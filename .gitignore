@@ -25,3 +25,6 @@ vite.config.ts.timestamp-*
 # Site data
 static/data/**/*.csv
 static/geojson/*.geojson
+static/geojson/filter_location/*.geojson
+.gitignore
+

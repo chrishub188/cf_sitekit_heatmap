@@ -9,8 +9,13 @@
 		crs = 'wgs84', // 'wgs84': x,y already lon,lat — 'epsg25832': x,y are UTM32N metres, reprojected below
 		pitch = 1, // grid spacing in metres, only used to derive cell size when crs is 'epsg25832'
 		bounds, // [west, south, east, north] — same rect SITE_AREAS draws, clips cells to it
+		filterUrl, // GeoJSON Polygon (static/geojson/filter_location/*) tracing the plaza's true outline
+		center, // [lng, lat] site centre, used when clipShape is 'circle'
+		radius = 100, // metres, radius of the 'circle' clip shape
+		clipShape = 'square', // 'square': clip to bounds — 'plaza': clip to the filterUrl polygon — 'circle': clip to radius around center
 		beforeId = 'site-marker', // insert below the site chrome so labels stay legible
 		excludeNtzg = [20, 21, 30, 32],
+		showFiltered = false, // show excluded-ntzg (Schwarzplan) and invalid-value cells as filtered overlay
 		gap = 0.9, // fraction of the grid pitch each cell fills; the rest is gap
 		roundness = 5, // superellipse exponent for cell corners; 2 = ellipse, higher = squarer
 		opacity = 0.35
@@ -19,6 +24,8 @@
 	const SOURCE_ID = 'heatmap-cells';
 	const LAYER_ID = 'heatmap-cells-fill';
 	const ROUND_SEGMENTS = 24;
+	const FILTERED_COLOR = '#141414'; // faint ghost tint for excluded/invalid cells — no stroke, so the map stays visible
+	const FILTERED_OPACITY = 0.025;
 
 	// ETRS89 / UTM zone 32N — covers both sites (Mannheim, Kaiserslautern).
 	const EPSG25832 = '+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs';
@@ -31,6 +38,67 @@
 			const s = Math.sin(theta);
 			return [Math.sign(c) * Math.abs(c) ** (2 / n), Math.sign(s) * Math.abs(s) ** (2 / n)];
 		});
+
+	// Even-odd ray cast; ring[0] is the outer boundary, any further rings are holes.
+	function pointInRing(x, y, ring) {
+		let inside = false;
+		for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+			const [xi, yi] = ring[i];
+			const [xj, yj] = ring[j];
+			const crosses = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+			if (crosses) inside = !inside;
+		}
+		return inside;
+	}
+
+	function pointInPolygon(x, y, rings) {
+		if (!pointInRing(x, y, rings[0])) return false;
+		return !rings.slice(1).some((hole) => pointInRing(x, y, hole));
+	}
+
+	const EARTH_RADIUS = 6371000; // metres
+
+	// Great-circle distance between two lon/lat points, in metres.
+	function haversine(lng1, lat1, lng2, lat2) {
+		const toRad = (d) => (d * Math.PI) / 180;
+		const dLat = toRad(lat2 - lat1);
+		const dLng = toRad(lng2 - lng1);
+		const a =
+			Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+		return 2 * EARTH_RADIUS * Math.asin(Math.sqrt(a));
+	}
+
+	function clipTest(currentClipShape, { bounds, polygonRings, center, radius }) {
+		if (currentClipShape === 'plaza' && polygonRings) return (r) => pointInPolygon(r.x, r.y, polygonRings);
+		if (currentClipShape === 'circle' && center) {
+			const [clng, clat] = center;
+			return (r) => haversine(r.x, r.y, clng, clat) <= radius;
+		}
+		if (!bounds) return null;
+		const [west, south, east, north] = bounds;
+		return (r) => r.x >= west && r.x <= east && r.y >= south && r.y <= north;
+	}
+
+	// Fetched once per filterUrl and kept for the component's lifetime.
+	const polygonCache = new Map();
+
+	async function loadPolygon(currentFilterUrl) {
+		if (!currentFilterUrl) return null;
+		if (polygonCache.has(currentFilterUrl)) return polygonCache.get(currentFilterUrl);
+		let rings = null;
+		try {
+			const res = await fetch(currentFilterUrl);
+			if (res.ok) {
+				const geojson = await res.json();
+				const geometry = geojson.features?.[0]?.geometry;
+				if (geometry?.type === 'Polygon') rings = geometry.coordinates;
+			}
+		} catch (err) {
+			console.warn(`heatmap: failed to load filter polygon ${currentFilterUrl}`, err);
+		}
+		polygonCache.set(currentFilterUrl, rings);
+		return rings;
+	}
 
 	function median(values) {
 		const sorted = [...values].sort((a, b) => a - b);
@@ -57,7 +125,7 @@
 					ntzg: parseInt(cols[ntzgi], 10)
 				};
 			})
-			.filter((r) => Number.isFinite(r.x) && Number.isFinite(r.y) && Number.isFinite(r.pet));
+			.filter((r) => Number.isFinite(r.x) && Number.isFinite(r.y));
 	}
 
 	// The generator writes points column by column (y rising within a column,
@@ -102,7 +170,7 @@
 		return currentCrs === 'epsg25832' ? (x, y) => proj4(EPSG25832, 'WGS84', [x, y]) : (x, y) => [x, y];
 	}
 
-	function buildGeoJson(rawRows, currentCrs) {
+	function buildGeoJson(rawRows, currentCrs, currentShowFiltered, currentClipShape, polygonRings) {
 		if (rawRows.length === 0) return null;
 		const project = projector(currentCrs);
 		const rows = rawRows.map((r) => {
@@ -110,12 +178,15 @@
 			return { ...r, x, y };
 		});
 
-		let included = rows.filter((r) => !excludeNtzg.includes(r.ntzg));
-		if (bounds) {
-			const [west, south, east, north] = bounds;
-			included = included.filter((r) => r.x >= west && r.x <= east && r.y >= south && r.y <= north);
+		const isFiltered = (r) => excludeNtzg.includes(r.ntzg) || !Number.isFinite(r.pet);
+		let included = rows.filter((r) => !isFiltered(r));
+		let filtered = currentShowFiltered ? rows.filter(isFiltered) : [];
+		const inBounds = clipTest(currentClipShape, { bounds, polygonRings, center, radius });
+		if (inBounds) {
+			included = included.filter(inBounds);
+			filtered = filtered.filter(inBounds);
 		}
-		if (included.length === 0) return null;
+		if (included.length === 0 && filtered.length === 0) return null;
 
 		// The 1 m dataset is a known regular grid (pitch metres, axis-aligned in
 		// UTM) but isn't guaranteed to be written in any particular row order, so
@@ -143,17 +214,22 @@
 		const color =
 			max > min ? scaleSequential(interpolateRdYlBu).domain([max, min]) : () => interpolateRdYlBu(0.5);
 
-		const features = included.map((r) => {
+		const toFeature = (r, cellColor, isFilteredCell) => {
 			const cx = r.x;
 			const cy = r.y;
 			const ring = shape.map(([sx, sy]) => [cx + sx * Ah.x + sy * Bh.x, cy + sx * Ah.y + sy * Bh.y]);
 			ring.push(ring[0]);
 			return {
 				type: 'Feature',
-				properties: { pet: r.pet, color: color(r.pet) },
+				properties: { pet: r.pet, color: cellColor, filtered: isFilteredCell },
 				geometry: { type: 'Polygon', coordinates: [ring] }
 			};
-		});
+		};
+
+		const features = [
+			...included.map((r) => toFeature(r, color(r.pet), false)),
+			...filtered.map((r) => toFeature(r, FILTERED_COLOR, true))
+		];
 
 		return { type: 'FeatureCollection', features };
 	}
@@ -169,7 +245,10 @@
 					id: LAYER_ID,
 					type: 'fill',
 					source: SOURCE_ID,
-					paint: { 'fill-color': ['get', 'color'], 'fill-opacity': opacity }
+					paint: {
+						'fill-color': ['get', 'color'],
+						'fill-opacity': ['case', ['==', ['get', 'filtered'], true], FILTERED_OPACITY, opacity]
+					}
 				},
 				before
 			);
@@ -180,12 +259,24 @@
 		map.getSource(SOURCE_ID)?.setData(geojson ?? { type: 'FeatureCollection', features: [] });
 	}
 
-	async function load(currentUrl, currentCrs) {
+	async function load(currentUrl, currentCrs, currentShowFiltered, currentFilterUrl, currentClipShape) {
 		if (!map || !currentUrl) return;
 		let geojson = null;
 		try {
-			const res = await fetch(currentUrl);
-			if (res.ok) geojson = buildGeoJson(parseCsv(await res.text()), currentCrs);
+			const wantsPolygon = currentClipShape === 'plaza' && currentFilterUrl;
+			const [res, polygonRings] = await Promise.all([
+				fetch(currentUrl),
+				wantsPolygon ? loadPolygon(currentFilterUrl) : Promise.resolve(null)
+			]);
+			if (res.ok) {
+				geojson = buildGeoJson(
+					parseCsv(await res.text()),
+					currentCrs,
+					currentShowFiltered,
+					currentClipShape,
+					polygonRings
+				);
+			}
 		} catch (err) {
 			console.warn(`heatmap: failed to load ${currentUrl}`, err);
 		}
@@ -199,7 +290,7 @@
 	}
 
 	$effect(() => {
-		load(url, crs);
+		load(url, crs, showFiltered, filterUrl, clipShape);
 	});
 
 	onDestroy(() => {
