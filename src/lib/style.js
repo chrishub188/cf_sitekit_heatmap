@@ -1,8 +1,6 @@
 // Custom map style for the Shortbread 1.0 schema served by VersaTiles.
 // Warm paper site plan: cream ground, tan paving, hairline buildings, sage planting.
 
-import { SITE_AREAS } from '$lib/sites.js';
-
 const SRC = 'versatiles-shortbread';
 
 const PAPER = '#F1EBDF';
@@ -65,7 +63,6 @@ const DRIVEABLE = [
 ];
 const ROUND = { 'line-cap': 'round', 'line-join': 'round' };
 const MARKER = ['==', ['get', 'kind'], 'marker'];
-const AREA = ['==', ['get', 'kind'], 'area'];
 
 export const customStyle = {
 	version: 8,
@@ -79,7 +76,8 @@ export const customStyle = {
 			maxzoom: 14,
 			attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>'
 		},
-		sites: { type: 'geojson', data: SITE_AREAS }
+		// Populated live from location.js's feed — see the marker effect in +page.svelte.
+		sites: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } }
 	},
 	layers: [
 		{ id: 'paper', type: 'background', paint: { 'background-color': PAPER } },
@@ -149,57 +147,29 @@ export const customStyle = {
 			}
 		},
 
-		// --- study area, from the uploaded bbox GeoJSON ---
-		// {
-		// 	id: 'site-area',
-		// 	type: 'fill',
-		// 	source: 'sites',
-		// 	filter: AREA,
-		// 	paint: { 'fill-color': INK, 'fill-opacity': 0.05 }
-		// },
-		// {
-		// 	id: 'site-outline',
-		// 	type: 'line',
-		// 	source: 'sites',
-		// 	filter: AREA,
-		// 	layout: { 'line-join': 'miter' },
-		// 	paint: {
-		// 		'line-color': INK,
-		// 		'line-width': zoom(14, 0.8, 18, 1.4, 21, 2.4),
-		// 		'line-dasharray': [5, 3]
-		// 	}
-		// },
+		// Generic "current location" marker — a halo behind a solid dot, no name label,
+		// since this marks whatever centre coordinate is passed in, not a named site.
+		{
+			id: 'site-marker-halo',
+			type: 'circle',
+			source: 'sites',
+			filter: MARKER,
+			paint: {
+				'circle-radius': zoom(14, 10, 18, 18, 21, 28),
+				'circle-color': INK,
+				'circle-opacity': 0.15
+			}
+		},
 		{
 			id: 'site-marker',
 			type: 'circle',
 			source: 'sites',
 			filter: MARKER,
 			paint: {
-				'circle-radius': zoom(14, 3, 18, 5, 21, 7),
+				'circle-radius': zoom(14, 5, 18, 8, 21, 12),
 				'circle-color': INK,
 				'circle-stroke-color': PAPER,
-				'circle-stroke-width': zoom(14, 1.2, 18, 2, 21, 3)
-			}
-		},
-		{
-			id: 'site-marker-label',
-			type: 'symbol',
-			source: 'sites',
-			filter: MARKER,
-			layout: {
-				'text-field': ['get', 'label'],
-				'text-font': ['noto_sans_regular'],
-				'text-size': ['interpolate', ['linear'], ['zoom'], 14, 10, 20, 13],
-				'text-letter-spacing': 0.1,
-				'text-offset': [0, -1.1],
-				'text-anchor': 'bottom',
-				'text-allow-overlap': true,
-				'text-rotation-alignment': 'viewport'
-			},
-			paint: {
-				'text-color': INK,
-				'text-halo-color': PAPER,
-				'text-halo-width': 1.8
+				'circle-stroke-width': zoom(14, 1.8, 18, 3, 21, 4.2)
 			}
 		},
 

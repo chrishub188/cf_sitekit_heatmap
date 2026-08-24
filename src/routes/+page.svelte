@@ -1,55 +1,67 @@
 <script>
+	import { onMount } from 'svelte';
 	import SiteMap from '$lib/components/SiteMap.svelte';
-	import SiteSwitch from '$lib/components/SiteSwitch.svelte';
-	import ResolutionSwitch from '$lib/components/ResolutionSwitch.svelte';
-	import FilteredToggle from '$lib/components/FilteredToggle.svelte';
-	import ClipShapeSwitch from '$lib/components/ClipShapeSwitch.svelte';
 	import Heatmap from '$lib/components/Heatmap.svelte';
-	import Legend from '$lib/components/Legend.svelte';
 	import { customStyle } from '$lib/style.js';
-	import { SITES, RESOLUTIONS, CLIP_SHAPES, RADIUS } from '$lib/sites.js';
+	import { RADIUS, siteForLocation } from '$lib/sites.js';
+	import { subscribeLocation } from '$lib/location.js';
 
-	let active = $state(0);
-	let resolution = $state('5m');
-	let showFiltered = $state(false);
-	let clipShape = $state('square');
+	const MARKER_SOURCE_ID = 'sites';
+
 	let map = $state(null);
-	let domain = $state(null);
-	const site = $derived(SITES[active]);
-	const crs = $derived(RESOLUTIONS.find((r) => r.id === resolution).crs);
+	let location = $state(null); // { lng, lat } (EPSG:4326) — null until the first fix arrives
+	let site = $state(null); // whichever SITES entry's real bbox contains `location`, or null if none does
+
+	// Once the first fix arrives, the matched site, the marker, the heatmap's
+	// radial clip, and the camera itself all follow the live location.
+	onMount(() => subscribeLocation((loc) => (location = loc)));
+
+	$effect(() => {
+		if (!location) return;
+		// Only replace `site` when the match actually changes — siteForLocation
+		// returns a fresh object/bounds array every call, and reassigning it
+		// every tick (even to an equivalent site) would retrigger SiteMap's
+		// fitBounds effect and fight the marker's own camera-follow easeTo.
+		siteForLocation(location).then((match) => {
+			if (match?.id !== site?.id) site = match;
+		});
+	});
+
+	$effect(() => {
+		if (!map || !location) return;
+		const center = [location.lng, location.lat];
+		const data = {
+			type: 'FeatureCollection',
+			features: [
+				{
+					type: 'Feature',
+					properties: { kind: 'marker' },
+					geometry: { type: 'Point', coordinates: center }
+				}
+			]
+		};
+		const apply = () => {
+			map.getSource(MARKER_SOURCE_ID)?.setData(data);
+			map.easeTo({ center, duration: 1000 });
+		};
+		// isStyleLoaded() can flicker back to false later (e.g. while new tiles
+		// stream in as the camera moves) — 'load' only ever fires once, so once
+		// the source is queryable we know the style loaded and can skip that gate.
+		if (map.getSource(MARKER_SOURCE_ID) || map.isStyleLoaded()) apply();
+		else map.once('load', apply);
+	});
 </script>
 
 <svelte:head>
-	<title>Site plans</title>
+	<title>Site plan</title>
 </svelte:head>
 
 <div class="stage">
-	<SiteMap
-		mapStyle={customStyle}
-		bounds={site.bounds}
-		bearing={site.bearing}
-		onready={(m) => (map = m)}
-	/>
-	{#if map}
-		<Heatmap
-			{map}
-			url={site.data[resolution]}
-			{crs}
-			bounds={site.bounds}
-			filterUrl={site.filterUrl}
-			center={site.center}
-			radius={RADIUS}
-			{clipShape}
-			{showFiltered}
-			ondomain={(d) => (domain = d)}
-		/>
+	{#if site}
+		<SiteMap mapStyle={customStyle} bounds={site.bounds} bearing={site.bearing} onready={(m) => (map = m)} />
 	{/if}
-	<SiteSwitch sites={SITES} {active} onselect={(i) => (active = i)} />
-	<ResolutionSwitch resolutions={RESOLUTIONS} active={resolution} onselect={(id) => (resolution = id)} />
-	<ClipShapeSwitch shapes={CLIP_SHAPES} active={clipShape} onselect={(id) => (clipShape = id)} />
-	<FilteredToggle active={showFiltered} onselect={(v) => (showFiltered = v)} />
-	{#if domain}
-		<Legend min={domain.min} max={domain.max} />
+	{#if map && location && site}
+		<Heatmap {map} url={site.data} center={[location.lng, location.lat]} radius={RADIUS} />
 	{/if}
 </div>
 
