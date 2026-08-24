@@ -19,8 +19,17 @@
 		// initialises and onMount only runs in the browser, so this keeps SSR alive.
 		// Depending on the version and how Vite pre-bundles it, the classes sit on
 		// `default` or on the namespace itself — accept either.
-		const mod = await import('maplibre-gl');
+		const [mod, workerUrlMod] = await Promise.all([
+			import('maplibre-gl'),
+			// maplibre-gl derives its worker URL at runtime from import.meta.url via
+			// a template string, which Vite can't statically analyse — so the worker
+			// file never gets copied into the build output on its own. Importing it
+			// explicitly with ?worker&url makes Vite emit it as a real asset, and we
+			// hand that URL to maplibre-gl below instead of letting it guess.
+			import('maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url')
+		]);
 		const maplibregl = mod.default?.Map ? mod.default : mod;
+		maplibregl.setWorkerUrl(workerUrlMod.default);
 		if (!container?.isConnected) return; // navigated away mid-load
 
 		map = new maplibregl.Map({
