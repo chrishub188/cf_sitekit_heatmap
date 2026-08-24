@@ -31,8 +31,8 @@ export const CLIP_SHAPES = [
 
 export const SITES = [
 	{
-		id: 'dahlbergplatz',
-		label: 'Dahlbergplatz',
+		id: 'dalbergplatz',
+		label: 'Dalbergplatz',
 		note: `Mannheim · ${SIZE} m`,
 		center: [8.466304325, 49.486004875], // dahlbergplatz_bbox_300m.geojson
 		bearing: 0, // lines the Quadrate grid up with the screen edge
