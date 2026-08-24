@@ -5,6 +5,7 @@
 	import FilteredToggle from '$lib/components/FilteredToggle.svelte';
 	import ClipShapeSwitch from '$lib/components/ClipShapeSwitch.svelte';
 	import Heatmap from '$lib/components/Heatmap.svelte';
+	import Legend from '$lib/components/Legend.svelte';
 	import { customStyle } from '$lib/style.js';
 	import { SITES, RESOLUTIONS, CLIP_SHAPES, RADIUS } from '$lib/sites.js';
 
@@ -13,6 +14,7 @@
 	let showFiltered = $state(false);
 	let clipShape = $state('square');
 	let map = $state(null);
+	let domain = $state(null);
 	const site = $derived(SITES[active]);
 	const crs = $derived(RESOLUTIONS.find((r) => r.id === resolution).crs);
 </script>
@@ -39,12 +41,16 @@
 			radius={RADIUS}
 			{clipShape}
 			{showFiltered}
+			ondomain={(d) => (domain = d)}
 		/>
 	{/if}
 	<SiteSwitch sites={SITES} {active} onselect={(i) => (active = i)} />
 	<ResolutionSwitch resolutions={RESOLUTIONS} active={resolution} onselect={(id) => (resolution = id)} />
 	<ClipShapeSwitch shapes={CLIP_SHAPES} active={clipShape} onselect={(id) => (clipShape = id)} />
 	<FilteredToggle active={showFiltered} onselect={(v) => (showFiltered = v)} />
+	{#if domain}
+		<Legend min={domain.min} max={domain.max} />
+	{/if}
 </div>
 
 <style>

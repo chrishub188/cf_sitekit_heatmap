@@ -18,7 +18,8 @@
 		showFiltered = false, // show excluded-ntzg (Schwarzplan) and invalid-value cells as filtered overlay
 		gap = 0.9, // fraction of the grid pitch each cell fills; the rest is gap
 		roundness = 5, // superellipse exponent for cell corners; 2 = ellipse, higher = squarer
-		opacity = 0.35
+		opacity = 0.35,
+		ondomain // called with {min, max} of the loaded PET values, or null, for a legend to reflect
 	} = $props();
 
 	const SOURCE_ID = 'heatmap-cells';
@@ -170,6 +171,8 @@
 		return currentCrs === 'epsg25832' ? (x, y) => proj4(EPSG25832, 'WGS84', [x, y]) : (x, y) => [x, y];
 	}
 
+	// Returns { geojson, domain } where domain is the {min, max} PET range the
+	// color scale was fit to (null if there was no data to color).
 	function buildGeoJson(rawRows, currentCrs, currentShowFiltered, currentClipShape, polygonRings) {
 		if (rawRows.length === 0) return null;
 		const project = projector(currentCrs);
@@ -208,11 +211,13 @@
 		const shape = unitShape(roundness);
 
 		const pets = included.map((r) => r.pet);
-		const min = Math.min(...pets);
-		const max = Math.max(...pets);
+		const min = pets.length ? Math.min(...pets) : null;
+		const max = pets.length ? Math.max(...pets) : null;
 		// Domain reversed ([max, min]) so higher PET maps to the interpolator's red end.
 		const color =
-			max > min ? scaleSequential(interpolateRdYlBu).domain([max, min]) : () => interpolateRdYlBu(0.5);
+			min != null && max != null && max > min
+				? scaleSequential(interpolateRdYlBu).domain([max, min])
+				: () => interpolateRdYlBu(0.5);
 
 		const toFeature = (r, cellColor, isFilteredCell) => {
 			const cx = r.x;
@@ -231,7 +236,10 @@
 			...filtered.map((r) => toFeature(r, FILTERED_COLOR, true))
 		];
 
-		return { type: 'FeatureCollection', features };
+		return {
+			geojson: { type: 'FeatureCollection', features },
+			domain: min != null ? { min, max } : null
+		};
 	}
 
 	function ensureLayer() {
@@ -261,7 +269,7 @@
 
 	async function load(currentUrl, currentCrs, currentShowFiltered, currentFilterUrl, currentClipShape) {
 		if (!map || !currentUrl) return;
-		let geojson = null;
+		let result = null;
 		try {
 			const wantsPolygon = currentClipShape === 'plaza' && currentFilterUrl;
 			const [res, polygonRings] = await Promise.all([
@@ -269,7 +277,7 @@
 				wantsPolygon ? loadPolygon(currentFilterUrl) : Promise.resolve(null)
 			]);
 			if (res.ok) {
-				geojson = buildGeoJson(
+				result = buildGeoJson(
 					parseCsv(await res.text()),
 					currentCrs,
 					currentShowFiltered,
@@ -283,7 +291,8 @@
 
 		const apply = () => {
 			ensureLayer();
-			setData(geojson);
+			setData(result?.geojson);
+			ondomain?.(result?.domain ?? null);
 		};
 		if (map.isStyleLoaded()) apply();
 		else map.once('load', apply);
