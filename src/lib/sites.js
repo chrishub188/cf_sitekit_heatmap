@@ -6,9 +6,13 @@
 const SIZE = 100; // metres per side for camera framing (the survey areas are 300m)
 const M_PER_DEG = 111320;
 
+// Camera framing for a location that falls outside every known survey area —
+// wider than SIZE since there's no site geometry to fit the crop to.
+export const NO_DATA_SIZE = 300;
+
 export const RADIUS = 50; // metres, radius of the radial clip around a site's centre
 
-const frameBbox = ([lng, lat], size = SIZE) => {
+export const frameBbox = ([lng, lat], size = SIZE) => {
 	const dy = size / 2 / M_PER_DEG;
 	const dx = dy / Math.cos((lat * Math.PI) / 180);
 	return [lng - dx, lat - dy, lng + dx, lat + dy]; // [west, south, east, north]

@@ -3,7 +3,7 @@
 	import SiteMap from '$lib/components/SiteMap.svelte';
 	import Heatmap from '$lib/components/Heatmap.svelte';
 	import { customStyle } from '$lib/style.js';
-	import { RADIUS, siteForLocation } from '$lib/sites.js';
+	import { RADIUS, NO_DATA_SIZE, siteForLocation, frameBbox } from '$lib/sites.js';
 	import { subscribeLocation } from '$lib/location.js';
 
 	const MARKER_SOURCE_ID = 'sites';
@@ -25,6 +25,24 @@
 		siteForLocation(location).then((match) => {
 			if (match?.id !== site?.id) site = match;
 		});
+	});
+
+	// No matched site means no survey data for the current fix — still frame
+	// the camera around the visitor once so the marker has somewhere to sit.
+	// Only set on the first no-site fix (not every tick): frameBbox returns a
+	// fresh array each call, and re-flying the camera on every GPS jitter would
+	// fight the marker's own camera-follow easeTo, same as the `site` guard above.
+	let bounds = $state(null);
+	let bearing = $state(0);
+
+	$effect(() => {
+		if (site) {
+			bounds = site.bounds;
+			bearing = site.bearing;
+		} else if (location && !bounds) {
+			bounds = frameBbox([location.lng, location.lat], NO_DATA_SIZE);
+			bearing = 0;
+		}
 	});
 
 	$effect(() => {
@@ -57,8 +75,8 @@
 </svelte:head>
 
 <div class="stage">
-	{#if site}
-		<SiteMap mapStyle={customStyle} bounds={site.bounds} bearing={site.bearing} onready={(m) => (map = m)} />
+	{#if bounds}
+		<SiteMap mapStyle={customStyle} {bounds} {bearing} onready={(m) => (map = m)} />
 	{/if}
 	{#if map && location && site}
 		<Heatmap {map} url={site.data} center={[location.lng, location.lat]} radius={RADIUS} />

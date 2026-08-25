@@ -155,7 +155,7 @@ export const customStyle = {
 			source: 'sites',
 			filter: MARKER,
 			paint: {
-				'circle-radius': zoom(14, 10, 18, 18, 21, 28),
+				'circle-radius': zoom(14, 14, 18, 26, 21, 41),
 				'circle-color': INK,
 				'circle-opacity': 0.15
 			}
@@ -166,10 +166,10 @@ export const customStyle = {
 			source: 'sites',
 			filter: MARKER,
 			paint: {
-				'circle-radius': zoom(14, 5, 18, 8, 21, 12),
+				'circle-radius': zoom(14, 7, 18, 12, 21, 18),
 				'circle-color': INK,
 				'circle-stroke-color': PAPER,
-				'circle-stroke-width': zoom(14, 1.8, 18, 3, 21, 4.2)
+				'circle-stroke-width': zoom(14, 2.6, 18, 4.3, 21, 6)
 			}
 		},
 
