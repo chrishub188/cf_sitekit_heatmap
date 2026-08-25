@@ -14,11 +14,22 @@
 	let location = $state(null); // { lng, lat } (EPSG:4326) — null until the first fix arrives
 	let site = $state(null); // whichever SITES entry's real bbox contains `location`, or null if none does
 	let heading = $state(0); // degrees clockwise from true north — defaults to north until/unless a real reading arrives
+	let headingHandle; // subscribeHeading's return value — carries .requestPermission() for the iOS gesture prompt below
+	let showCompassPrompt = $state(false); // iOS 13+ only: compass access needs a tap, not just page load
 
 	// Once the first fix arrives, the matched site, the marker, the heatmap's
 	// radial clip, and the camera itself all follow the live location.
 	onMount(() => subscribeLocation((loc) => (location = loc)));
-	onMount(() => subscribeHeading((h) => (heading = h)));
+	onMount(() => {
+		headingHandle = subscribeHeading(
+			(h) => (heading = h),
+			(granted) => {
+				if (granted) showCompassPrompt = false;
+			}
+		);
+		showCompassPrompt = !!headingHandle.needsPermission;
+		return headingHandle;
+	});
 
 	function offsetMetres([lng, lat], bearingDeg, distanceM) {
 		const rad = (bearingDeg * Math.PI) / 180;
@@ -33,11 +44,11 @@
 	// true radial gradient, so this approximates one with stepped bands. The
 	// innermost band already has width at its base (nonzero inner radius)
 	// rather than converging to a sharp point, so it isn't a dagger.
-	const HEADING_INNER_RADIUS_M = 2.5;
+	const HEADING_INNER_RADIUS_M = 1;
 	const HEADING_OUTER_RADIUS_M = 10;
 	const HEADING_HALF_ANGLE = 45; // degrees either side of heading
 	const HEADING_ARC_SEGMENTS = 10;
-	const HEADING_BANDS = 100; // more, finer bands read as a smooth fade instead of visible steps
+	const HEADING_BANDS = 16; // more, finer bands read as a smooth fade instead of visible steps
 	const HEADING_MAX_OPACITY = 0.8; // nearest the marker
 	const HEADING_MIN_OPACITY = 0.2; // at the outer edge
 
@@ -146,10 +157,33 @@
 	{/if}
 </div>
 
+{#if showCompassPrompt}
+	<button class="compass-prompt" onclick={() => headingHandle.requestPermission()}>
+		Enable compass
+	</button>
+{/if}
+
 <style>
 	.stage {
 		position: fixed;
 		inset: 0;
+	}
+
+	.compass-prompt {
+		position: fixed;
+		top: calc(env(safe-area-inset-top, 0px) + 16px);
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 1;
+		padding: 8px 16px;
+		border: 1px solid #d5c9b1;
+		border-radius: 999px;
+		background: #f1ebdf;
+		color: #9a9081;
+		font: inherit;
+		font-size: 14px;
+		cursor: pointer;
+		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 	}
 
 	:global(body) {

@@ -3,11 +3,14 @@
 // subscribe(onUpdate) -> unsubscribe shape as location.js; onUpdate receives
 // degrees clockwise from true north (0-360).
 //
-// iOS 13+ gates this behind a permission that can only be requested from a
-// user gesture, which this module doesn't have (it's called from onMount, not
-// a tap) — so on iOS it typically stays silent unless already granted. Any
-// runtime where no reading ever arrives falls back to FALLBACK_HEADING
-// (north), mirroring location.js's fallback location.
+// iOS 13+ (every browser there, not just Safari — they're all WebKit) gates
+// this behind a permission that can only be requested from a direct user
+// gesture. The auto-attempt below (from onMount, not a tap) will usually be
+// silently denied on a first visit, but the returned unsubscribe function
+// also carries `.requestPermission()` and `.needsPermission` so a caller can
+// retry from an actual click/tap — see the "Enable compass" prompt in
+// +page.svelte. Any runtime where no real reading ever arrives falls back to
+// FALLBACK_HEADING (north), mirroring location.js's fallback location.
 
 const FALLBACK_HEADING = 0; // degrees, true north
 const FALLBACK_DELAY_MS = 3000;
@@ -22,9 +25,10 @@ function toHeading(event) {
 	return null;
 }
 
-export function subscribeHeading(onUpdate) {
+export function subscribeHeading(onUpdate, onPermissionResolved) {
 	let gotFix = false;
 	let fallbackSent = false;
+	let listening = false;
 
 	const emitFallback = () => {
 		if (gotFix || fallbackSent) return;
@@ -35,7 +39,10 @@ export function subscribeHeading(onUpdate) {
 	if (typeof DeviceOrientationEvent === 'undefined') {
 		console.warn('heading: DeviceOrientation API not available in this runtime — using fallback heading');
 		emitFallback();
-		return () => {};
+		const noop = () => {};
+		noop.needsPermission = false;
+		noop.requestPermission = async () => false;
+		return noop;
 	}
 
 	const handleOrientation = (event) => {
@@ -46,23 +53,45 @@ export function subscribeHeading(onUpdate) {
 	};
 
 	const eventName = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
-	const start = () => window.addEventListener(eventName, handleOrientation);
+	const start = () => {
+		if (listening) return;
+		listening = true;
+		window.addEventListener(eventName, handleOrientation);
+	};
 
-	if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-		DeviceOrientationEvent.requestPermission()
-			.then((state) => {
-				if (state === 'granted') start();
-				else console.warn('heading: motion/orientation permission not granted — using fallback heading');
-			})
-			.catch((err) => console.warn(`heading: permission request failed — ${err.message}`));
-	} else {
-		start();
+	const gated = typeof DeviceOrientationEvent.requestPermission === 'function';
+
+	// Shared by the automatic onMount attempt below and any later gesture-
+	// triggered retry — both just need to start listening on a grant.
+	async function requestPermission() {
+		if (!gated) {
+			start();
+			onPermissionResolved?.(true);
+			return true;
+		}
+		try {
+			const state = await DeviceOrientationEvent.requestPermission();
+			const granted = state === 'granted';
+			if (granted) start();
+			else console.warn('heading: motion/orientation permission not granted — using fallback heading');
+			onPermissionResolved?.(granted);
+			return granted;
+		} catch (err) {
+			console.warn(`heading: permission request failed — ${err.message}`);
+			onPermissionResolved?.(false);
+			return false;
+		}
 	}
+
+	requestPermission();
 
 	const fallbackTimer = setTimeout(emitFallback, FALLBACK_DELAY_MS);
 
-	return () => {
+	const unsubscribe = () => {
 		clearTimeout(fallbackTimer);
 		window.removeEventListener(eventName, handleOrientation);
 	};
+	unsubscribe.needsPermission = gated;
+	unsubscribe.requestPermission = requestPermission;
+	return unsubscribe;
 }
