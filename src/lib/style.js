@@ -62,8 +62,6 @@ const DRIVEABLE = [
 	['match', ['get', 'kind'], ['footway', 'path', 'steps', 'cycleway', 'track', 'runway', 'taxiway'], false, true]
 ];
 const ROUND = { 'line-cap': 'round', 'line-join': 'round' };
-const MARKER = ['==', ['get', 'kind'], 'marker'];
-const HEADING = ['==', ['get', 'kind'], 'heading'];
 
 export const customStyle = {
 	version: 8,
@@ -76,9 +74,7 @@ export const customStyle = {
 			minzoom: 0,
 			maxzoom: 14,
 			attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>'
-		},
-		// Populated live from location.js's feed — see the marker effect in +page.svelte.
-		sites: { type: 'geojson', data: { type: 'FeatureCollection', features: [] } }
+		}
 	},
 	layers: [
 		{ id: 'paper', type: 'background', paint: { 'background-color': PAPER } },
@@ -145,44 +141,6 @@ export const customStyle = {
 			paint: {
 				'line-color': '#CDC1A9',
 				'line-width': ['interpolate', ['exponential', 1.5], ['zoom'], 15, 0.4, 18, 0.9, 21, 2.4]
-			}
-		},
-
-		// Generic "current location" marker — a halo behind a solid dot, no name label,
-		// since this marks whatever centre coordinate is passed in, not a named site.
-		{
-			id: 'site-marker-halo',
-			type: 'circle',
-			source: 'sites',
-			filter: MARKER,
-			paint: {
-				'circle-radius': zoom(14, 14, 18, 26, 21, 41),
-				'circle-color': INK,
-				'circle-opacity': 0.15
-			}
-		},
-		// Direction wedge: several concentric bands fanning out toward the
-		// visitor's heading, each carrying its own `opacity` (set in
-		// +page.svelte) so they read as one wedge fading out with distance from
-		// site-marker (drawn after it, tucking the wedge's near edge underneath)
-		// — the same low-key "flashlight beam" language maps apps use.
-		{
-			id: 'site-marker-heading',
-			type: 'fill',
-			source: 'sites',
-			filter: HEADING,
-			paint: { 'fill-color': INK, 'fill-opacity': ['get', 'opacity'], 'fill-antialias': false }
-		},
-		{
-			id: 'site-marker',
-			type: 'circle',
-			source: 'sites',
-			filter: MARKER,
-			paint: {
-				'circle-radius': zoom(14, 7, 18, 12, 21, 18),
-				'circle-color': INK,
-				'circle-stroke-color': PAPER,
-				'circle-stroke-width': zoom(14, 2.6, 18, 4.3, 21, 6)
 			}
 		},
 

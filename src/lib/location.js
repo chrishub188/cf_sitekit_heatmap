@@ -1,13 +1,16 @@
-// Live "current position" feed — drives both the map marker and the radial
+// Live "current position" store — drives both the map marker and the radial
 // data selection. Sourced from the runtime's Geolocation API (browser/WebView/
-// device). Keeps the subscribe(onUpdate) -> unsubscribe contract and the
-// { lng, lat } shape (EPSG:4326) so callers don't need to change.
+// device). A `readable` store: the watch starts on first subscriber and stops
+// when the last one unsubscribes, so every consumer shares one GPS watch.
+// Value shape is { lng, lat } (EPSG:4326).
 //
 // If the API is missing, permission is denied, or no fix ever arrives (seen
 // e.g. on standalone Meta Quest, whose WebView often doesn't wire up the
 // geolocation permission prompt at all — see conversation), FALLBACK_LOCATION
 // is emitted after a short delay so the app still shows something instead of
 // staying blank forever. A real fix, if it arrives later, always overrides it.
+
+import { readable } from 'svelte/store';
 
 const GEO_OPTIONS = {
 	enableHighAccuracy: true,
@@ -20,14 +23,14 @@ const GEO_OPTIONS = {
 const FALLBACK_LOCATION = { lng: 8.483312, lat: 49.469456 };
 const FALLBACK_DELAY_MS = 8000;
 
-export function subscribeLocation(onUpdate) {
+export const location = readable(null, (set) => {
 	let gotFix = false;
 	let fallbackSent = false;
 
 	const emitFallback = () => {
 		if (gotFix || fallbackSent) return;
 		fallbackSent = true;
-		onUpdate(FALLBACK_LOCATION);
+		set(FALLBACK_LOCATION);
 	};
 
 	if (!('geolocation' in navigator)) {
@@ -38,7 +41,7 @@ export function subscribeLocation(onUpdate) {
 
 	const handlePosition = ({ coords }) => {
 		gotFix = true;
-		onUpdate({ lng: coords.longitude, lat: coords.latitude });
+		set({ lng: coords.longitude, lat: coords.latitude });
 	};
 	const handleError = (err) => {
 		console.warn(`location: geolocation error — ${err.message}`);
@@ -52,4 +55,4 @@ export function subscribeLocation(onUpdate) {
 		clearTimeout(fallbackTimer);
 		navigator.geolocation.clearWatch(watchId);
 	};
-}
+});

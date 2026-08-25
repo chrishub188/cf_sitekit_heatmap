@@ -1,16 +1,19 @@
-// Live compass heading feed — drives the direction cone on the map marker.
-// Sourced from the runtime's DeviceOrientation API. Keeps the same
-// subscribe(onUpdate) -> unsubscribe shape as location.js; onUpdate receives
-// degrees clockwise from true north (0-360).
+// Live compass heading store — drives the direction cone on the map marker.
+// Sourced from the runtime's DeviceOrientation API. A `readable` store, same
+// sharing behaviour as location.js: the listener starts on first subscriber
+// and stops when the last one unsubscribes. Value is degrees clockwise from
+// true north (0-360).
 //
 // iOS 13+ (every browser there, not just Safari — they're all WebKit) gates
 // this behind a permission that can only be requested from a direct user
-// gesture. The auto-attempt below (from onMount, not a tap) will usually be
-// silently denied on a first visit, but the returned unsubscribe function
-// also carries `.requestPermission()` and `.needsPermission` so a caller can
-// retry from an actual click/tap — see the "Enable compass" prompt in
-// +page.svelte. Any runtime where no real reading ever arrives falls back to
+// gesture. The auto-attempt below (fired when the store starts, not a tap)
+// will usually be silently denied on a first visit — `needsCompassPrompt`
+// flips true so a caller can show an "Enable compass" button, and
+// `requestHeadingPermission()` retries from that button's actual click/tap.
+// Any runtime where no real reading ever arrives falls back to
 // FALLBACK_HEADING (north), mirroring location.js's fallback location.
+
+import { readable, writable } from 'svelte/store';
 
 const FALLBACK_HEADING = 0; // degrees, true north
 const FALLBACK_DELAY_MS = 3000;
@@ -25,34 +28,39 @@ function toHeading(event) {
 	return null;
 }
 
-export function subscribeHeading(onUpdate, onPermissionResolved) {
+// True while iOS still needs an explicit tap to unlock real compass readings.
+export const needsCompassPrompt = writable(false);
+
+// Reassigned by the store's start function once it runs; requestHeadingPermission
+// just forwards to whatever it's currently bound to.
+let requestPermissionImpl = async () => false;
+
+export const heading = readable(FALLBACK_HEADING, (set) => {
 	let gotFix = false;
 	let fallbackSent = false;
-	let listening = false;
 
 	const emitFallback = () => {
 		if (gotFix || fallbackSent) return;
 		fallbackSent = true;
-		onUpdate(FALLBACK_HEADING);
+		set(FALLBACK_HEADING);
 	};
 
 	if (typeof DeviceOrientationEvent === 'undefined') {
 		console.warn('heading: DeviceOrientation API not available in this runtime — using fallback heading');
 		emitFallback();
-		const noop = () => {};
-		noop.needsPermission = false;
-		noop.requestPermission = async () => false;
-		return noop;
+		requestPermissionImpl = async () => false;
+		return () => {};
 	}
 
 	const handleOrientation = (event) => {
 		const value = toHeading(event);
 		if (value == null) return;
 		gotFix = true;
-		onUpdate(value);
+		set(value);
 	};
 
 	const eventName = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
+	let listening = false;
 	const start = () => {
 		if (listening) return;
 		listening = true;
@@ -60,38 +68,44 @@ export function subscribeHeading(onUpdate, onPermissionResolved) {
 	};
 
 	const gated = typeof DeviceOrientationEvent.requestPermission === 'function';
+	needsCompassPrompt.set(gated);
 
-	// Shared by the automatic onMount attempt below and any later gesture-
-	// triggered retry — both just need to start listening on a grant.
-	async function requestPermission() {
+	// Shared by the automatic attempt below and any later gesture-triggered
+	// retry via requestHeadingPermission — both just need to start listening
+	// on a grant.
+	requestPermissionImpl = async () => {
 		if (!gated) {
 			start();
-			onPermissionResolved?.(true);
 			return true;
 		}
 		try {
 			const state = await DeviceOrientationEvent.requestPermission();
 			const granted = state === 'granted';
-			if (granted) start();
-			else console.warn('heading: motion/orientation permission not granted — using fallback heading');
-			onPermissionResolved?.(granted);
+			if (granted) {
+				start();
+				needsCompassPrompt.set(false);
+			} else {
+				console.warn('heading: motion/orientation permission not granted — using fallback heading');
+			}
 			return granted;
 		} catch (err) {
 			console.warn(`heading: permission request failed — ${err.message}`);
-			onPermissionResolved?.(false);
 			return false;
 		}
-	}
+	};
 
-	requestPermission();
+	requestPermissionImpl();
 
 	const fallbackTimer = setTimeout(emitFallback, FALLBACK_DELAY_MS);
 
-	const unsubscribe = () => {
+	return () => {
 		clearTimeout(fallbackTimer);
 		window.removeEventListener(eventName, handleOrientation);
 	};
-	unsubscribe.needsPermission = gated;
-	unsubscribe.requestPermission = requestPermission;
-	return unsubscribe;
+});
+
+// Retries the permission prompt from an actual tap/click — see the
+// "Enable compass" prompt in +page.svelte.
+export function requestHeadingPermission() {
+	return requestPermissionImpl();
 }
