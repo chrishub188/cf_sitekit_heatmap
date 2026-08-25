@@ -63,6 +63,7 @@ const DRIVEABLE = [
 ];
 const ROUND = { 'line-cap': 'round', 'line-join': 'round' };
 const MARKER = ['==', ['get', 'kind'], 'marker'];
+const HEADING = ['==', ['get', 'kind'], 'heading'];
 
 export const customStyle = {
 	version: 8,
@@ -159,6 +160,18 @@ export const customStyle = {
 				'circle-color': INK,
 				'circle-opacity': 0.15
 			}
+		},
+		// Direction wedge: several concentric bands fanning out toward the
+		// visitor's heading, each carrying its own `opacity` (set in
+		// +page.svelte) so they read as one wedge fading out with distance from
+		// site-marker (drawn after it, tucking the wedge's near edge underneath)
+		// — the same low-key "flashlight beam" language maps apps use.
+		{
+			id: 'site-marker-heading',
+			type: 'fill',
+			source: 'sites',
+			filter: HEADING,
+			paint: { 'fill-color': INK, 'fill-opacity': ['get', 'opacity'], 'fill-antialias': false }
 		},
 		{
 			id: 'site-marker',
