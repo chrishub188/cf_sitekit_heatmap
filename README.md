@@ -1,11 +1,33 @@
 # CF Temperature Map
 
 A SvelteKit + MapLibre GL app for visualising urban thermal comfort (PET —
-Physiological Equivalent Temperature) as a heatmap over site plans.
+Physiological Equivalent Temperature) as a heatmap around a visitor's live
+location.
 
-Each site is a small study area with a pre-computed PET grid. The map shows
-the site's outline and lets you switch between sites and between two grid
-resolutions; cells are colored on a red–blue scale (red = hotter/higher PET).
+Rather than a manually browsable map, the app follows the visitor: it centers
+on their live position, and — if they're standing inside one of a fixed set
+of pre-surveyed study areas — clips that site's PET grid to a radius around
+them and shows it as a heatmap, colored on a red–blue scale (red = hotter/
+higher PET).
+
+## Using the app
+
+1. On load, the app requests location access (the browser's normal
+   geolocation permission prompt) and starts tracking position continuously.
+2. It also listens for compass heading. On iOS, this requires an explicit tap
+   — an **"Enable compass"** button appears until you grant it.
+3. Once a location fix arrives, a marker appears there with a heading wedge
+   pointing the way you're facing, and the camera centers on it.
+4. If that location falls inside one of the known survey sites (see below),
+   the camera reframes to that site's crop, and the site's PET heatmap
+   appears clipped to a circle around you. Outside all sites, the camera
+   still frames the area around you, but no heatmap is shown.
+5. All of this keeps following you live as your position and heading change
+   — the marker, camera, and heatmap clip continuously update in place, no
+   reload or manual interaction required. There's no UI for picking a site
+   or grid resolution; the app is entirely driven by location and heading,
+   whether from device sensors or an external source (see
+   [Location & heading input](#location--heading-input)).
 
 ## Sites & data
 
@@ -13,32 +35,78 @@ Sites are configured in [src/lib/sites.js](src/lib/sites.js):
 
 - **Dahlbergplatz** (Mannheim)
 - **Am Altenhof** (Kaiserslautern)
+- **TH-Vorplatz**
 
-Each site ships two CSV grids under [static/data/](static/data/):
+Each site ships a 1x1 m PET grid CSV under
+[static/data/1mx1m/](static/data/1mx1m/), with coordinates in UTM zone 32N
+(EPSG:25832), reprojected client-side in
+[Heatmap.svelte](src/lib/components/Heatmap.svelte). Each CSV has `x`, `y`,
+and a `pet` (or `value`) column; an optional `ntzg` column flags land-use
+classes excluded from the heatmap by default.
 
-- `5mx5m/` — 5 m grid, coordinates already in lon/lat (WGS84)
-- `1mx1m/` — 1 m grid, coordinates in UTM zone 32N (EPSG:25832), reprojected
-  client-side in [Heatmap.svelte](src/lib/components/Heatmap.svelte)
+Each site also has a boundary file under
+[static/geojson/](static/geojson/) (`*_bbox_300m.geojson`) — this is fetched
+at runtime, not just for reference: its polygon defines the site's real ~300m
+survey area, which `siteForLocation()` in `sites.js` uses to decide whether a
+visitor's live location falls inside that site, and its `center` property
+seeds the tighter camera-framing crop around it.
 
-Each CSV has `x`, `y`, and a `pet` (or `value`) column; an optional `ntzg`
-column flags land-use classes excluded from the heatmap by default.
-
-To add a new site: add its bounding-box center, label, and CSV paths to
-`SITES` in `src/lib/sites.js`, and drop the corresponding CSVs into
-`static/data/5mx5m/` and `static/data/1mx1m/`.
-
-[static/geojson/](static/geojson/) holds the original site-boundary GeoJSON
-files the bbox centers in `sites.js` were derived from. They're reference
-only — not fetched at runtime; `sites.js` rebuilds each site's bounding box
-and study-area polygon from its `center` instead.
+To add a new site: add an entry to `SITES` in `src/lib/sites.js` (an `id`, a
+`bearing` to align the camera with the site's own grid, and the CSV `data`
+path), drop the CSV into `static/data/1mx1m/`, and add a matching
+`*_bbox_300m.geojson` boundary file to `static/geojson/` with a `center`
+property and a boundary ring covering the real survey area.
 
 ## Map style
 
 [src/lib/style.js](src/lib/style.js) defines `customStyle`, a MapLibre style
 JSON for a warm "paper site plan" look (cream ground, tan paving, hairline
-buildings, sage planting). Basemap layers come from OpenStreetMap vector
-tiles (VersaTiles, Shortbread schema); a `sites` GeoJSON source built from
-`SITE_AREAS` (in `sites.js`) adds the site marker and label on top.
+buildings, sage planting). All basemap layers — ground, buildings, roads,
+land-use fills — come from OpenStreetMap vector tiles (VersaTiles, Shortbread
+schema); there's no app-specific site marker or label layer in the basemap
+itself. The live-location marker and the heatmap are drawn on top by their
+own components:
+
+- [LocationMarker.svelte](src/lib/components/LocationMarker.svelte) — the
+  dot and heading wedge at the visitor's live location.
+- [Heatmap.svelte](src/lib/components/Heatmap.svelte) — the current site's
+  PET grid, reprojected and clipped to a radius around the visitor.
+
+## Location & heading input
+
+The marker, camera follow, and heatmap radial clip are all driven by two
+stores — `location` ([src/lib/location.js](src/lib/location.js)) and
+`heading` ([src/lib/heading.js](src/lib/heading.js)) — which can each be fed
+from either of two sources, decided independently at page load:
+
+- **Device (default)** — `navigator.geolocation.watchPosition` and the
+  `deviceorientation`/`deviceorientationabsolute` events. Used whenever the
+  page loads with no `lat`/`lng`/`heading` query params — e.g. plain
+  browser or mobile testing.
+- **Embedded (external)** — for driving the app from a host app, such as a
+  Unity/Meta Quest app that already knows the visitor's position and
+  bearing and embeds this app via `<iframe>`:
+  - **Initial value** comes from query params on the iframe's URL:
+    `?lat=<latitude>&lng=<longitude>&heading=<degrees>`. `lat`/`lng` and
+    `heading` are checked independently, so e.g. `?heading=90` alone still
+    lets location fall back to the device while heading is externally driven.
+    For example, to open directly on the TH-Vorplatz site facing east:
+    ```
+    https://your-deployed-map.example.com/?lat=49.469456&lng=8.483312&heading=90
+    ```
+  - **Live updates** arrive via `postMessage` from the parent frame, so the
+    iframe never has to navigate/reload to reflect a new position:
+    ```js
+    iframeEl.contentWindow.postMessage(
+    	{ source: 'cf-temperature-map', lat, lng, heading },
+    	'*'
+    );
+    ```
+    `lat`/`lng` and `heading` can be sent together or separately (e.g.
+    heading updates far more often than position). Messages are tagged with
+    `source: 'cf-temperature-map'` so unrelated `message` events are
+    ignored; the sender's origin is intentionally not validated. If updates
+    stop arriving, the marker/heatmap simply freeze at the last known value.
 
 ## Developing
 

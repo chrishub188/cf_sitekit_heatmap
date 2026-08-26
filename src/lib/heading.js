@@ -14,9 +14,14 @@
 // FALLBACK_HEADING (north), mirroring location.js's fallback location.
 
 import { readable, writable } from 'svelte/store';
+import { rafThrottle } from './rafThrottle.js';
 
 const FALLBACK_HEADING = 0; // degrees, true north
 const FALLBACK_DELAY_MS = 3000;
+
+// Tag on postMessage payloads so unrelated `message` events (devtools,
+// extensions, other embedders) are ignored.
+const MESSAGE_SOURCE = 'cf-temperature-map';
 
 // iOS Safari's webkitCompassHeading is already relative to true north.
 // Standard `alpha` (from deviceorientationabsolute, or deviceorientation with
@@ -44,6 +49,36 @@ export const heading = readable(FALLBACK_HEADING, (set) => {
 		fallbackSent = true;
 		set(FALLBACK_HEADING);
 	};
+
+	// Embedded mode: a heading query param on the page URL means the host
+	// (e.g. a Unity WebView) is driving bearing, not the device's own compass.
+	// Initial value comes from the query param; live updates arrive via
+	// postMessage from the parent frame so the iframe never has to reload.
+	// Independent of location.js's own query-param check, so either source
+	// can come from the device and the other from the host during testing.
+	const params = new URLSearchParams(window.location.search);
+	const heading0 = params.get('heading');
+
+	if (heading0 !== null) {
+		const value = Number(heading0);
+		if (Number.isFinite(value)) {
+			gotFix = true;
+			set(((value % 360) + 360) % 360);
+		}
+		needsCompassPrompt.set(false);
+		requestPermissionImpl = async () => true; // nothing to grant in external mode
+
+		const handleMessage = rafThrottle((/** @type {MessageEvent} */ event) => {
+			const data = event.data;
+			if (!data || data.source !== MESSAGE_SOURCE) return;
+			if (typeof data.heading === 'number') {
+				gotFix = true;
+				set(((data.heading % 360) + 360) % 360);
+			}
+		});
+		window.addEventListener('message', handleMessage);
+		return () => window.removeEventListener('message', handleMessage);
+	}
 
 	if (typeof DeviceOrientationEvent === 'undefined') {
 		console.warn('heading: DeviceOrientation API not available in this runtime — using fallback heading');
