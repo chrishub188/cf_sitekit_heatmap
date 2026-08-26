@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head><title>embed test</title></head>
+<body style="margin:0">
+<div style="padding:8px;font-family:sans-serif">
+	<button id="move">post new lat/lng/heading</button>
+	<span id="status"></span>
+</div>
+<iframe id="f" src="http://localhost:5173/?lat=49.486004875&lng=8.466304325&heading=45" style="width:100%;height:80vh;border:1px solid #ccc"></iframe>
+<script>
+	let n = 0;
+	document.getElementById('move').onclick = () => {
+		n++;
+		const lat = 49.486004875 + n * 0.0003;
+		const lng = 8.466304325 + n * 0.0003;
+		const heading = (45 + n * 30) % 360;
+		document.getElementById('f').contentWindow.postMessage(
+			{ source: 'cf-temperature-map', lat, lng, heading }, '*'
+		);
+		document.getElementById('status').textContent = `sent lat=${lat.toFixed(6)} lng=${lng.toFixed(6)} heading=${heading}`;
+	};
+</script>
+</body>
+</html>

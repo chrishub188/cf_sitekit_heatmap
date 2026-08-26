@@ -2,7 +2,7 @@
 // Sourced from the runtime's DeviceOrientation API. A `readable` store, same
 // sharing behaviour as location.js: the listener starts on first subscriber
 // and stops when the last one unsubscribes. Value is degrees clockwise from
-// true north (0-360).
+// true north (0-360), or null if there's no heading to show.
 //
 // iOS 13+ (every browser there, not just Safari — they're all WebKit) gates
 // this behind a permission that can only be requested from a direct user
@@ -11,7 +11,11 @@
 // flips true so a caller can show an "Enable compass" button, and
 // `requestHeadingPermission()` retries from that button's actual click/tap.
 // Any runtime where no real reading ever arrives falls back to
-// FALLBACK_HEADING (north), mirroring location.js's fallback location.
+// FALLBACK_HEADING (north), mirroring location.js's fallback location —
+// except in embedded mode (location.js's own lat/lng query params present)
+// with no heading param: there the host is driving position but not bearing,
+// so this device's own compass would show the wrong direction entirely. That
+// case stays null forever — no wedge, marker shows location only.
 
 import { readable, writable } from 'svelte/store';
 import { rafThrottle } from './rafThrottle.js';
@@ -40,7 +44,7 @@ export const needsCompassPrompt = writable(false);
 // just forwards to whatever it's currently bound to.
 let requestPermissionImpl = async () => false;
 
-export const heading = readable(FALLBACK_HEADING, (set) => {
+export const heading = readable(null, (set) => {
 	let gotFix = false;
 	let fallbackSent = false;
 
@@ -78,6 +82,17 @@ export const heading = readable(FALLBACK_HEADING, (set) => {
 		});
 		window.addEventListener('message', handleMessage);
 		return () => window.removeEventListener('message', handleMessage);
+	}
+
+	// Embedded mode (location.js's own lat/lng query params present) but no
+	// heading param: the host is driving position, not bearing. Falling
+	// through to this device's own compass would show a direction that has
+	// nothing to do with the visitor the host is tracking, so just leave the
+	// heading as null — marker shows location only, no wedge.
+	if (params.get('lat') !== null && params.get('lng') !== null) {
+		needsCompassPrompt.set(false);
+		requestPermissionImpl = async () => true;
+		return () => {};
 	}
 
 	if (typeof DeviceOrientationEvent === 'undefined') {

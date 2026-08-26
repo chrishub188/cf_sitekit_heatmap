@@ -4,7 +4,7 @@
 	let {
 		map, // maplibre Map instance (from SiteMap's onready)
 		location, // { lng, lat } (EPSG:4326) — no marker drawn until this arrives
-		heading = 0, // degrees clockwise from true north
+		heading = null, // degrees clockwise from true north; null = no direction wedge, dot only
 		beforeId = 'street-label', // insert below street labels, same stacking as the old static style layers
 		color = '#9A9081', // INK, matches style.js's site plan ink
 		haloColor = color,
@@ -66,10 +66,11 @@
 
 	function buildGeoJson(currentLocation, currentHeading) {
 		const center = [currentLocation.lng, currentLocation.lat];
+		const bands = currentHeading == null ? [] : headingBands(center, currentHeading);
 		return {
 			type: 'FeatureCollection',
 			features: [
-				...headingBands(center, currentHeading).map(({ ring, opacity }) => ({
+				...bands.map(({ ring, opacity }) => ({
 					type: 'Feature',
 					properties: { opacity },
 					geometry: { type: 'Polygon', coordinates: [ring] }
