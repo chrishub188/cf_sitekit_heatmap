@@ -23,7 +23,11 @@
 
 import { writable } from 'svelte/store';
 
-const ROUND_SEGMENTS = 24;
+// Vertices per cell outline. Every one of the ~7850 cells inside the clip is
+// re-triangulated and re-filled on each repaint, so this multiplies straight
+// into the draw cost — and a cell is well under a metre across on screen,
+// where the corner rounding reads the same at half the resolution.
+const ROUND_SEGMENTS = 12;
 const M_PER_DEG = 111320;
 
 // Unit superellipse sampled once; each cell reuses it via an affine map (below).

@@ -34,9 +34,9 @@ const GEO_OPTIONS = {
 
 // // TH-Vorplatz survey site's real centre (see static/geojson/TH_Vorplatz_bbox_300m.geojson) —
 // // falling back here lands inside a known site, so the fallback still gets real heatmap data.
-const FALLBACK_LOCATION = { lng: 8.483312, lat: 49.469456 };
+//const FALLBACK_LOCATION = { lng: 8.483312, lat: 49.469456 };
 //Dalbergplatz survey site's real centre (see static/geojson/Dalbergplatz_bbox_300m.geojson) —
-//const FALLBACK_LOCATION = { lng: 8.466304325, lat: 49.486004875 };
+const FALLBACK_LOCATION = { lng: 8.466304325, lat: 49.486004875 };
 const FALLBACK_DELAY_MS = 8000;
 
 // Metres a fix has to differ from the last published one to be worth

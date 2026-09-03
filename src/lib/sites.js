@@ -3,14 +3,23 @@
 // used to find which site a location falls inside. The camera frames a
 // tighter SIZE-metre crop around that same site's centre.
 
-const SIZE = 100; // metres per side for camera framing (the survey areas are 300m)
+// Metres per side for camera framing (the survey areas are 300m). Kept at
+// 2 * RADIUS so the clip circle meets the edges of the frame rather than
+// floating inside it with a margin of empty basemap — change one and the
+// other should follow.
+const SIZE = 80;
 const M_PER_DEG = 111320;
 
 // Camera framing for a location that falls outside every known survey area —
 // wider than SIZE since there's no site geometry to fit the crop to.
 export const NO_DATA_SIZE = 300;
 
-export const RADIUS = 50; // metres, radius of the radial clip around a site's centre
+// Metres, radius of the radial clip around the visitor. Area — and with it the
+// number of cells drawn on every repaint — goes with the square, so this is the
+// bluntest lever on draw cost: 40 m instead of 50 m is a third fewer cells.
+// It's a content decision first, though: it sets how far around themselves a
+// visitor can read the data.
+export const RADIUS = 40;
 
 export const frameBbox = ([lng, lat], size = SIZE) => {
 	const dy = size / 2 / M_PER_DEG;
