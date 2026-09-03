@@ -47,7 +47,7 @@
 	$effect(() => {
 		if (!map || !$location) return;
 		const center = [$location.lng, $location.lat];
-		const apply = () => map.easeTo({ center, duration: 1000 });
+		const apply = () => map.easeTo({ center, duration: 100 });
 		// isStyleLoaded() can flicker back to false later (e.g. while new tiles
 		// stream in as the camera moves) — 'load' only ever fires once, so once
 		// a static style layer is queryable we know the style loaded and can skip that gate.
