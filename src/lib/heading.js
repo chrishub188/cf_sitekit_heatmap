@@ -1,8 +1,13 @@
 // Live compass heading store — drives the direction cone on the map marker.
-// Sourced from the runtime's DeviceOrientation API. A `readable` store, same
-// sharing behaviour as location.js: the listener starts on first subscriber
-// and stops when the last one unsubscribes. Value is degrees clockwise from
-// true north (0-360), or null if there's no heading to show.
+// Sourced from the runtime's DeviceOrientation API, or from an embedding host
+// via embedPose.js. A `readable` store, same sharing behaviour as location.js:
+// the source starts on first subscriber and stops when the last one
+// unsubscribes. Value is degrees clockwise from true north (0-360), or null if
+// there's no heading to show.
+//
+// Unlike location.js there is no gate anywhere on this path: a heading is a
+// single number going into a store, and every millisecond of delay here is
+// delay the visitor sees when they turn.
 //
 // iOS 13+ (every browser there, not just Safari — they're all WebKit) gates
 // this behind a permission that can only be requested from a direct user
@@ -18,14 +23,10 @@
 // case stays null forever — no wedge, marker shows location only.
 
 import { readable, writable } from 'svelte/store';
-import { rafThrottle } from './rafThrottle.js';
+import { isEmbedded, hasHeadingParam, embedHeading } from './embedPose.js';
 
 const FALLBACK_HEADING = 0; // degrees, true north
 const FALLBACK_DELAY_MS = 3000;
-
-// Tag on postMessage payloads so unrelated `message` events (devtools,
-// extensions, other embedders) are ignored.
-const MESSAGE_SOURCE = 'cf-temperature-map';
 
 // iOS Safari's webkitCompassHeading is already relative to true north.
 // Standard `alpha` (from deviceorientationabsolute, or deviceorientation with
@@ -58,30 +59,18 @@ export const heading = readable(null, (set) => {
 	// (e.g. a Unity WebView) is driving bearing, not the device's own compass.
 	// Initial value comes from the query param; live updates arrive via
 	// postMessage from the parent frame so the iframe never has to reload.
+	// Both are handled in embedPose.js — this store just re-publishes them.
 	// Independent of location.js's own query-param check, so either source
 	// can come from the device and the other from the host during testing.
-	const params = new URLSearchParams(window.location.search);
-	const heading0 = params.get('heading');
-
-	if (heading0 !== null) {
-		const value = Number(heading0);
-		if (Number.isFinite(value)) {
-			gotFix = true;
-			set(((value % 360) + 360) % 360);
-		}
+	if (hasHeadingParam) {
 		needsCompassPrompt.set(false);
 		requestPermissionImpl = async () => true; // nothing to grant in external mode
 
-		const handleMessage = rafThrottle((/** @type {MessageEvent} */ event) => {
-			const data = event.data;
-			if (!data || data.source !== MESSAGE_SOURCE) return;
-			if (typeof data.heading === 'number') {
-				gotFix = true;
-				set(((data.heading % 360) + 360) % 360);
-			}
+		return embedHeading.subscribe((value) => {
+			if (value == null) return;
+			gotFix = true;
+			set(value);
 		});
-		window.addEventListener('message', handleMessage);
-		return () => window.removeEventListener('message', handleMessage);
 	}
 
 	// Embedded mode (location.js's own lat/lng query params present) but no
@@ -89,7 +78,7 @@ export const heading = readable(null, (set) => {
 	// through to this device's own compass would show a direction that has
 	// nothing to do with the visitor the host is tracking, so just leave the
 	// heading as null — marker shows location only, no wedge.
-	if (params.get('lat') !== null && params.get('lng') !== null) {
+	if (isEmbedded) {
 		needsCompassPrompt.set(false);
 		requestPermissionImpl = async () => true;
 		return () => {};

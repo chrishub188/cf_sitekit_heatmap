@@ -11,7 +11,14 @@
 		strokeColor = '#F1EBDF' // PAPER, matches style.js's paper ground
 	} = $props();
 
-	const SOURCE_ID = 'location-marker';
+	// Two sources rather than one, because the two inputs update at completely
+	// different rates: position changes at walking pace, heading changes every
+	// time the visitor turns their head. Sharing a source meant every heading
+	// tick also re-uploaded the dot and halo, and every position tick re-built
+	// the wedge — with a host feed at ~5 Hz that is a lot of pointless traffic
+	// through MapLibre's worker. Split, a turn touches only the wedge.
+	const POINT_SOURCE_ID = 'location-marker';
+	const WEDGE_SOURCE_ID = 'location-marker-wedge';
 	const HALO_LAYER_ID = 'location-marker-halo';
 	const HEADING_LAYER_ID = 'location-marker-heading';
 	const DOT_LAYER_ID = 'location-marker-dot';
@@ -31,6 +38,8 @@
 	const HEADING_BANDS = 16; // more, finer bands read as a smooth fade instead of visible steps
 	const HEADING_MAX_OPACITY = 0.8; // nearest the marker
 	const HEADING_MIN_OPACITY = 0.2; // at the outer edge
+
+	const EMPTY = { type: 'FeatureCollection', features: [] };
 
 	const zoomExpr = (...stops) => ['interpolate', ['exponential', 1.6], ['zoom'], ...stops];
 
@@ -64,29 +73,38 @@
 		});
 	}
 
-	function buildGeoJson(currentLocation, currentHeading) {
-		const center = [currentLocation.lng, currentLocation.lat];
-		const bands = currentHeading == null ? [] : headingBands(center, currentHeading);
+	function buildPoint(currentLocation) {
 		return {
 			type: 'FeatureCollection',
 			features: [
-				...bands.map(({ ring, opacity }) => ({
-					type: 'Feature',
-					properties: { opacity },
-					geometry: { type: 'Polygon', coordinates: [ring] }
-				})),
 				{
 					type: 'Feature',
 					properties: {},
-					geometry: { type: 'Point', coordinates: center }
+					geometry: { type: 'Point', coordinates: [currentLocation.lng, currentLocation.lat] }
 				}
 			]
 		};
 	}
 
+	function buildWedge(currentLocation, currentHeading) {
+		if (currentHeading == null) return EMPTY;
+		const center = [currentLocation.lng, currentLocation.lat];
+		return {
+			type: 'FeatureCollection',
+			features: headingBands(center, currentHeading).map(({ ring, opacity }) => ({
+				type: 'Feature',
+				properties: { opacity },
+				geometry: { type: 'Polygon', coordinates: [ring] }
+			}))
+		};
+	}
+
 	function ensureLayers() {
-		if (!map.getSource(SOURCE_ID)) {
-			map.addSource(SOURCE_ID, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+		if (!map.getSource(POINT_SOURCE_ID)) {
+			map.addSource(POINT_SOURCE_ID, { type: 'geojson', data: EMPTY });
+		}
+		if (!map.getSource(WEDGE_SOURCE_ID)) {
+			map.addSource(WEDGE_SOURCE_ID, { type: 'geojson', data: EMPTY });
 		}
 		const before = map.getLayer(beforeId) ? beforeId : undefined;
 
@@ -98,8 +116,7 @@
 				{
 					id: HALO_LAYER_ID,
 					type: 'circle',
-					source: SOURCE_ID,
-					filter: ['==', ['geometry-type'], 'Point'],
+					source: POINT_SOURCE_ID,
 					paint: {
 						'circle-radius': zoomExpr(14, 14, 18, 26, 21, 41),
 						'circle-color': haloColor,
@@ -114,8 +131,7 @@
 				{
 					id: HEADING_LAYER_ID,
 					type: 'fill',
-					source: SOURCE_ID,
-					filter: ['==', ['geometry-type'], 'Polygon'],
+					source: WEDGE_SOURCE_ID,
 					paint: { 'fill-color': color, 'fill-opacity': ['get', 'opacity'], 'fill-antialias': false }
 				},
 				before
@@ -126,8 +142,7 @@
 				{
 					id: DOT_LAYER_ID,
 					type: 'circle',
-					source: SOURCE_ID,
-					filter: ['==', ['geometry-type'], 'Point'],
+					source: POINT_SOURCE_ID,
 					paint: {
 						'circle-radius': zoomExpr(14, 7, 18, 12, 21, 18),
 						'circle-color': color,
@@ -140,22 +155,47 @@
 		}
 	}
 
-	function refresh(currentLocation, currentHeading) {
-		if (!map || !currentLocation) return;
-		const data = buildGeoJson(currentLocation, currentHeading);
-		const apply = () => {
-			ensureLayers();
-			map.getSource(SOURCE_ID)?.setData(data);
-		};
+	// Held outside the effects so a deferred apply (see below) always uploads
+	// the newest data rather than whatever was current when it was scheduled.
+	let pointData = EMPTY;
+	let wedgeData = EMPTY;
+
+	function applyData() {
+		ensureLayers();
+		map.getSource(POINT_SOURCE_ID)?.setData(pointData);
+		map.getSource(WEDGE_SOURCE_ID)?.setData(wedgeData);
+	}
+
+	let deferred = false;
+
+	function push(sourceId, data) {
 		// isStyleLoaded() can flicker back to false later (e.g. while new tiles
 		// stream in as the camera moves) — 'load' only ever fires once, so once
 		// our own layer exists we know the style loaded and can skip that flaky gate.
-		if (map.getLayer(DOT_LAYER_ID) || map.isStyleLoaded()) apply();
-		else map.once('load', apply);
+		if (map.getLayer(DOT_LAYER_ID) || map.isStyleLoaded()) {
+			ensureLayers();
+			map.getSource(sourceId)?.setData(data);
+		} else if (!deferred) {
+			// Both effects can land here before the style is ready; one deferred
+			// apply covers both sources, and it reads the latest data either way.
+			deferred = true;
+			map.once('load', applyData);
+		}
 	}
 
+	// Position: dot and halo only.
 	$effect(() => {
-		refresh(location, heading);
+		if (!map || !location) return;
+		pointData = buildPoint(location);
+		push(POINT_SOURCE_ID, pointData);
+	});
+
+	// Heading: the wedge only. Reads `location` too (the wedge is anchored to
+	// it), but a turn in place re-uploads ~350 coordinates and nothing else.
+	$effect(() => {
+		if (!map || !location) return;
+		wedgeData = buildWedge(location, heading);
+		push(WEDGE_SOURCE_ID, wedgeData);
 	});
 
 	onDestroy(() => {
@@ -163,6 +203,8 @@
 		for (const id of [HALO_LAYER_ID, HEADING_LAYER_ID, DOT_LAYER_ID]) {
 			if (map.getLayer(id)) map.removeLayer(id);
 		}
-		if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID);
+		for (const id of [POINT_SOURCE_ID, WEDGE_SOURCE_ID]) {
+			if (map.getSource(id)) map.removeSource(id);
+		}
 	});
 </script>

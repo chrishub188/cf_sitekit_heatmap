@@ -44,10 +44,16 @@
 	// Camera follow — keyed to $location only. Deliberately not re-run on
 	// heading changes: compass readings arrive far more often than location
 	// fixes, and re-flying the camera on every tick would fight itself.
+	//
+	// jumpTo rather than an animated move: an easeTo per fix keeps the map
+	// permanently in an animation, re-rendering and re-requesting tiles the
+	// whole time, and with a live feed each new one aborts the last one
+	// mid-flight anyway. location.js only publishes a fix once the visitor has
+	// moved a metre, so the jump is no more visible than the 100 ms ease was.
 	$effect(() => {
 		if (!map || !$location) return;
 		const center = [$location.lng, $location.lat];
-		const apply = () => map.easeTo({ center, duration: 100 });
+		const apply = () => map.jumpTo({ center });
 		// isStyleLoaded() can flicker back to false later (e.g. while new tiles
 		// stream in as the camera moves) — 'load' only ever fires once, so once
 		// a static style layer is queryable we know the style loaded and can skip that gate.

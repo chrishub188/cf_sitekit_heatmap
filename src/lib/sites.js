@@ -18,24 +18,26 @@ export const frameBbox = ([lng, lat], size = SIZE) => {
 	return [lng - dx, lat - dy, lng + dx, lat + dy]; // [west, south, east, north]
 };
 
-// 1x1m grid CSVs (EPSG:25832, reprojected client-side — see Heatmap.svelte).
+// `data` points at the prepared 1x1m grid (EPSG:4326, already reprojected —
+// generated from the raw EPSG:25832 CSVs by `npm run prepare:data`, see
+// scripts/prepare-data.js).
 export const SITES = [
 	{
 		id: 'dalbergplatz',
 		bearing: 0, // lines the Quadrate grid up with the screen edge
-		data: '/data/1mx1m/dalbergplatz.csv',
+		data: '/data/prepared/dalbergplatz.json',
 		geojson: '/geojson/dahlbergplatz_bbox_300m.geojson'
 	},
 	{
 		id: 'am-altenhof',
 		bearing: 0,
-		data: '/data/1mx1m/am_altenhof.csv',
+		data: '/data/prepared/am_altenhof.json',
 		geojson: '/geojson/Am_Altenhof_bbox_300m.geojson'
 	},
 	{
 		id: 'th-vorplatz',
 		bearing: 0,
-		data: '/data/1mx1m/th_vorplatz.csv',
+		data: '/data/prepared/th_vorplatz.json',
 		geojson: '/geojson/TH_Vorplatz_bbox_300m.geojson'
 	}
 ];
