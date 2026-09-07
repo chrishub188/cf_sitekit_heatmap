@@ -27,8 +27,8 @@
 	// one moment to the next. Fixed ends make colours comparable across
 	// positions and across sites. Readings outside the range are clamped to the
 	// end colours. Change these two numbers to retune the scale.
-	const PET_MIN = 31; // blue end
-	const PET_MAX = 46; // red end
+	const PET_MIN = 32; // blue end
+	const PET_MAX = 45; // red end
 	const COLOR_STOPS = 11;
 
 	const M_PER_DEG = 111320;
