@@ -26,6 +26,9 @@
 	let scaleMax = $state(null);
 	const site = $derived(SITES[active]);
 	const crs = $derived(RESOLUTIONS.find((r) => r.id === resolution).crs);
+	// The 'full' shape swaps in the wider rect for both the clip and the camera;
+	// plaza and circle keep the 100 m framing they already assume.
+	const viewBounds = $derived(clipShape === 'full' ? site.fullBounds : site.bounds);
 </script>
 
 <svelte:head>
@@ -35,7 +38,7 @@
 <div class="stage">
 	<SiteMap
 		mapStyle={customStyle}
-		bounds={site.bounds}
+		bounds={viewBounds}
 		bearing={site.bearing}
 		onready={(m) => (map = m)}
 	/>
@@ -44,7 +47,7 @@
 			{map}
 			url={site.data[resolution]}
 			{crs}
-			bounds={site.bounds}
+			bounds={viewBounds}
 			filterUrl={site.filterUrl}
 			center={site.center}
 			radius={RADIUS}

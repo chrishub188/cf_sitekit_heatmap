@@ -8,11 +8,11 @@
 		url, // CSV with x,y,pet|value,(ntzg) columns
 		crs = 'wgs84', // 'wgs84': x,y already lon,lat — 'epsg25832': x,y are UTM32N metres, reprojected below
 		pitch = 1, // grid spacing in metres, only used to derive cell size when crs is 'epsg25832'
-		bounds, // [west, south, east, north] — same rect SITE_AREAS draws, clips cells to it
+		bounds, // [west, south, east, north] — the rect 'square'/'full' clip to; the caller picks which
 		filterUrl, // GeoJSON Polygon (static/geojson/filter_location/*) tracing the plaza's true outline
 		center, // [lng, lat] site centre, used when clipShape is 'circle'
 		radius = 100, // metres, radius of the 'circle' clip shape
-		clipShape = 'square', // 'square': clip to bounds — 'plaza': clip to the filterUrl polygon — 'circle': clip to radius around center
+		clipShape = 'square', // 'square'/'full': clip to bounds — 'plaza': clip to the filterUrl polygon — 'circle': clip to radius around center
 		beforeId = 'site-marker', // insert below the site chrome so labels stay legible
 		excludeNtzg = [20, 21, 30, 32],
 		showFiltered = false, // show excluded-ntzg (Schwarzplan) and invalid-value cells as filtered overlay
@@ -27,6 +27,11 @@
 	const SOURCE_ID = 'heatmap-cells';
 	const LAYER_ID = 'heatmap-cells-fill';
 	const ROUND_SEGMENTS = 24;
+	// Past this many cells the grid is only ever framed zoomed far enough out that a
+	// cell covers about a pixel, so the superellipse corners cost vertices — the
+	// bulk of the geometry — that nobody can see. Only 300 m at 1 m reaches it.
+	const COARSE_SEGMENTS = 8;
+	const COARSE_ABOVE = 8000; // cells
 	const COLOR_STOPS = 16; // samples of the continuous ramp handed to MapLibre's interpolate
 	const FILTERED_COLOR = '#141414'; // faint ghost tint for excluded/invalid cells — no stroke, so the map stays visible
 	const FILTERED_OPACITY = 0.025;
@@ -57,9 +62,9 @@
 	const EPSG25832 = '+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs';
 
 	// Unit superellipse sampled once; each cell reuses it via an affine map (below).
-	const unitShape = (n) =>
-		Array.from({ length: ROUND_SEGMENTS }, (_, i) => {
-			const theta = (i / ROUND_SEGMENTS) * Math.PI * 2;
+	const unitShape = (n, segments) =>
+		Array.from({ length: segments }, (_, i) => {
+			const theta = (i / segments) * Math.PI * 2;
 			const c = Math.cos(theta);
 			const s = Math.sin(theta);
 			return [Math.sign(c) * Math.abs(c) ** (2 / n), Math.sign(s) * Math.abs(s) ** (2 / n)];
@@ -233,10 +238,18 @@
 		if (!vectors) return null;
 		const Ah = { x: (vectors.A.x / 2) * gap, y: (vectors.A.y / 2) * gap };
 		const Bh = { x: (vectors.B.x / 2) * gap, y: (vectors.B.y / 2) * gap };
-		const shape = unitShape(roundness);
+		const cellCount = included.length + filtered.length;
+		const shape = unitShape(roundness, cellCount > COARSE_ABOVE ? COARSE_SEGMENTS : ROUND_SEGMENTS);
 
-		const pets = included.map((r) => r.pet);
-		const domain = pets.length ? { min: Math.min(...pets), max: Math.max(...pets) } : null;
+		// A loop, not Math.min(...pets): the 300 m crop at 1 m passes 40k cells, which
+		// is at or past the argument-count limit in some engines.
+		/** @type {{ min: number, max: number } | null} */
+		let domain = null;
+		for (const r of included) {
+			if (!domain) domain = { min: r.pet, max: r.pet };
+			else if (r.pet < domain.min) domain.min = r.pet;
+			else if (r.pet > domain.max) domain.max = r.pet;
+		}
 
 		const toFeature = (r, isFilteredCell) => {
 			const cx = r.x;
