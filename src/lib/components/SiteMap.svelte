@@ -1,6 +1,15 @@
 <script>
 	import { onMount } from 'svelte';
 	import 'maplibre-gl/dist/maplibre-gl.css';
+	// maplibre-gl locates its worker script by guessing a sibling URL from its
+	// own bundled chunk's import.meta.url. That guess only holds when the
+	// library ships as its own untouched file; once Vite bundles it into a
+	// shared chunk (production builds), the guess points at a file that was
+	// never copied to the output, so the browser gets a 404/HTML response and
+	// refuses it as a worker (wrong MIME type). Importing the worker with
+	// `?url` makes Vite copy it as a real build asset and gives us the true
+	// URL, which we register explicitly before creating any Map.
+	import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 
 	let {
 		mapStyle, // a style object works exactly like a style URL
@@ -22,6 +31,8 @@
 		const mod = await import('maplibre-gl');
 		const maplibregl = mod.default?.Map ? mod.default : mod;
 		if (!container?.isConnected) return; // navigated away mid-load
+
+		(maplibregl.setWorkerUrl ?? mod.setWorkerUrl)(maplibreWorkerUrl);
 
 		map = new maplibregl.Map({
 			container,
