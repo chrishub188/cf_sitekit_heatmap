@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import 'maplibre-gl/dist/maplibre-gl.css';
+	import { FIT } from '$lib/sites.js';
 	// maplibre-gl locates its worker (and the worker's own "shared" chunk) by
 	// guessing sibling URLs from import.meta.url at runtime. That guess only
 	// holds when the library ships as its own untouched file; once Vite
@@ -14,7 +15,7 @@
 		mapStyle, // a style object works exactly like a style URL
 		bounds, // [west, south, east, north]
 		bearing = 0,
-		fit = { padding: 40, maxZoom: 19.5 },
+		fit = FIT,
 		onready // handed the map instance once it exists
 	} = $props();
 

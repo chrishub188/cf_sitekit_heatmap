@@ -1,12 +1,17 @@
 <script>
-	// A row of mutually exclusive buttons: {id, label}[]. Used for the clip
-	// shapes and for the overlay mode switch.
+	// A row of mutually exclusive buttons: {id, label, disabled?, title?}[]. Used
+	// for the clip shapes, the overlay mode switch and the before/after switch.
 	let { options, active, onselect } = $props();
 </script>
 
 <nav>
 	{#each options as option}
-		<button class:on={option.id === active} onclick={() => onselect?.(option.id)}>
+		<button
+			class:on={option.id === active}
+			disabled={option.disabled}
+			title={option.title}
+			onclick={() => onselect?.(option.id)}
+		>
 			{option.label}
 		</button>
 	{/each}
@@ -34,8 +39,13 @@
 		cursor: pointer;
 	}
 
-	button:hover {
+	button:hover:not(:disabled) {
 		color: #6f665a;
+	}
+
+	button:disabled {
+		color: #cdc1a9;
+		cursor: default;
 	}
 
 	button.on {

@@ -11,8 +11,17 @@
 	import LogRow from '$lib/components/LogRow.svelte';
 	import Legend from '$lib/components/Legend.svelte';
 	import AiWatermark from '$lib/components/AiWatermark.svelte';
+	import RecenterButton from '$lib/components/RecenterButton.svelte';
 	import { customStyle } from '$lib/style.js';
-	import { SITES, RESOLUTIONS, CLIP_SHAPES, RADIUS, SIMULATION_RADIUS, nearestSite } from '$lib/sites.js';
+	import {
+		SITES,
+		RESOLUTIONS,
+		CLIP_SHAPES,
+		PHASES,
+		RADIUS,
+		SIMULATION_RADIUS,
+		nearestSite
+	} from '$lib/sites.js';
 	import { parseLogfile, readLogFile } from '$lib/logfile.js';
 	import { clipTest } from '$lib/clip.js';
 	import { gridToRows, requestEnvGrid } from '$lib/envgrid.js';
@@ -46,6 +55,7 @@
 	/** @type {string | null} */
 	let logError = $state(null);
 	let mode = $state('heatmap');
+	let phase = $state('after'); // 'before' | 'after' — which grid the heatmap draws for the log's site
 	let shownTrees = $state(0); // crowns left after the active clip shape, reported by the overlay
 	const interventions = $derived(log?.interventions ?? []);
 
@@ -62,10 +72,18 @@
 	const baseGrid = $derived(
 		baseline?.site === active && baseline.status === 'ready' ? baseline.grid : null
 	);
-	const cells = $derived.by(() => {
-		const grid = simulated ?? baseGrid;
-		return grid ? gridToRows(grid, cellSize) : null;
-	});
+	const grid = $derived(phase === 'after' && simulated ? simulated : baseGrid);
+	const cells = $derived(grid ? gridToRows(grid, cellSize) : null);
+	// Before/After only means something on the log's own site, once a rerun has
+	// been requested; 'After' stays greyed out until the backend answers.
+	const comparable = $derived(mode === 'heatmap' && log?.site === active && simulation != null);
+	const phaseOptions = $derived(
+		PHASES.map((p) =>
+			p.id === 'after' && !simulated
+				? { ...p, disabled: true, title: simulation?.message ?? 'Simulating…' }
+				: p
+		)
+	);
 
 	// Each backend call opens a new session and takes seconds, so a site's
 	// baseline is fetched once per page load and reused on every revisit. A
@@ -187,6 +205,7 @@
 		// Start at the full count so the row never briefly shows the previous
 		// log's "n of m" before the overlay reports back.
 		shownTrees = parsed.interventions.length;
+		phase = 'after';
 		active = match.index;
 		mode = 'trees';
 	}
@@ -243,6 +262,20 @@
 	<LogDropZone onfile={loadFile} onerror={reportError} />
 	<SiteSwitch sites={SITES} {active} onselect={(i) => (active = i)} />
 	<ResolutionSwitch resolutions={RESOLUTIONS} active={resolution} onselect={(id) => (resolution = id)} />
+	<div class="top">
+		{#if comparable}
+			<div class="chip">
+				<SegmentedSwitch
+					options={phaseOptions}
+					active={simulated ? phase : 'before'}
+					onselect={(id) => (phase = id)}
+				/>
+			</div>
+		{/if}
+		{#if map}
+			<RecenterButton {map} bounds={viewBounds} bearing={site.bearing} />
+		{/if}
+	</div>
 	<ControlPanel>
 		<!-- Always mounted: with no data loaded the scale row stays in place and
 		     simply shows empty value boxes, so the panel never changes height. -->
@@ -250,7 +283,7 @@
 			min={scaleMin ?? domain?.min ?? null}
 			max={scaleMax ?? domain?.max ?? null}
 			pinned={scaleMin != null || scaleMax != null}
-			status={simulated || baseline?.status === 'ready' ? null : (baseline?.status ?? null)}
+			status={grid ? null : (baseline?.status ?? null)}
 			statusMessage={baseline?.message ?? null}
 			onmin={(v) => (scaleMin = v)}
 			onmax={(v) => (scaleMax = v)}
@@ -292,6 +325,29 @@
 		align-items: stretch;
 	}
 
+	/* Top centre, between the site tabs and the resolution switch. */
+	.top {
+		position: absolute;
+		top: 1rem;
+		left: 50%;
+		display: flex;
+		gap: 0.4rem;
+		transform: translateX(-50%);
+	}
+
+	/* Same framing as the resolution switch, around the shared segmented switch. */
+	.chip {
+		padding: 1px;
+		border: 1px solid #cdc1a9;
+		border-radius: 999px;
+		background: #cdc1a9;
+	}
+
+	/* Rounded inside the 1px ring too, so the end buttons don't show square corners. */
+	.chip :global(nav) {
+		overflow: hidden;
+		border-radius: 999px;
+	}
 	/* Hairline + breathing room so the toggle doesn't read as a fourth
 	   button in the clip-shape group next to it. */
 	.aside {

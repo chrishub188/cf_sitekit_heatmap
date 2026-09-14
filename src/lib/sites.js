@@ -42,6 +42,16 @@ export const OVERLAY_MODES = [
 	{ id: 'trees', label: 'Trees' }
 ];
 
+// Which grid the heatmap draws once a log's site has been rerun: the baseline
+// or the recalculation with the log's trees in place.
+export const PHASES = [
+	{ id: 'before', label: 'Before' },
+	{ id: 'after', label: 'After' }
+];
+
+// How the camera frames a site's bounds, on load, on a switch and on recenter.
+export const FIT = { padding: 40, maxZoom: 19.5 };
+
 export const SITES = [
 	{
 		id: 'dalbergplatz',
