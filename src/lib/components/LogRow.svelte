@@ -8,6 +8,8 @@
 		shown = 0, // how many survived the active clip shape
 		entries = 0, // records in the log; only worth showing when there's more than one
 		error = null, // parse or read failure; replaces the controls
+		simulation = null, // 'loading' | 'ready' | 'error' — the recalculated heatmap for the site on screen
+		simulationError = null, // why the recalculation failed, shown on hover
 		mode = 'heatmap',
 		onmode,
 		onfile, // (File) => void, from the picker
@@ -21,6 +23,14 @@
 	// shape on screen is hiding some.
 	const tally = $derived(shown < count ? `${shown} of ${count} trees` : `${count} trees`);
 	const meta = $derived(entries > 1 ? `${entries} entries · ${tally}` : tally);
+	// Says which heatmap is on screen: while loading or after a failure it is
+	// still the static data, which would otherwise pass for the simulated one.
+	/** @type {Record<string, string>} */
+	const SIMULATION_LABELS = {
+		loading: 'Simulating…',
+		ready: 'Simulated',
+		error: 'Static · sim failed'
+	};
 
 	function pick(e) {
 		const [file] = e.currentTarget.files ?? [];
@@ -35,6 +45,13 @@
 		<p class="error">{error}</p>
 	{:else if name}
 		<SegmentedSwitch options={OVERLAY_MODES} active={mode} onselect={onmode} />
+		{#if simulation}
+			<span
+				class="sim"
+				class:failed={simulation === 'error'}
+				title={simulation === 'error' ? simulationError : null}>{SIMULATION_LABELS[simulation]}</span
+			>
+		{/if}
 		<span class="meta" title={name}>{meta} · {name}</span>
 	{:else}
 		<!-- No log yet: the row is the affordance, since drag and drop alone
@@ -57,6 +74,7 @@
 	}
 
 	.meta,
+	.sim,
 	.error,
 	.load,
 	.clear {
@@ -73,8 +91,16 @@
 		white-space: nowrap;
 	}
 
-	.error {
+	.error,
+	.sim.failed {
 		color: #a2503f;
+	}
+
+	/* Sits between the switch and the tally; the tally's own left padding is
+	   the gap, so this one only needs padding on the switch side. */
+	.sim {
+		padding-right: 0;
+		white-space: nowrap;
 	}
 
 	/* The panel is width:fit-content, so an unbounded filename would widen the

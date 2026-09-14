@@ -3,10 +3,12 @@
 	import { scaleSequential, interpolateRdYlBu } from 'd3';
 	import proj4 from 'proj4';
 	import { clipTest, loadPolygon } from '$lib/clip.js';
+	import { EPSG25832 } from '$lib/geo.js';
 
 	let {
 		map, // maplibre Map instance (from SiteMap's onready)
 		url, // CSV with x,y,pet|value,(ntzg) columns
+		rows = null, // already-parsed { x, y, pet, ntzg } rows (e.g. a recalculated grid); replaces url when set
 		crs = 'wgs84', // 'wgs84': x,y already lon,lat — 'epsg25832': x,y are UTM32N metres, reprojected below
 		pitch = 1, // grid spacing in metres, only used to derive cell size when crs is 'epsg25832'
 		bounds, // [west, south, east, north] — the rect 'square'/'full' clip to; the caller picks which
@@ -59,9 +61,6 @@
 				: interpolateRdYlBu(0.5);
 		return ['case', ['==', ['get', 'filtered'], true], FILTERED_COLOR, ramp];
 	}
-
-	// ETRS89 / UTM zone 32N — covers both sites (Mannheim, Kaiserslautern).
-	const EPSG25832 = '+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs';
 
 	// Unit superellipse sampled once; each cell reuses it via an affine map (below).
 	const unitShape = (n, segments) =>
@@ -265,27 +264,28 @@
 	// could otherwise resolve last and repaint the shape the user just left.
 	let generation = 0;
 
-	async function load(currentUrl, currentCrs, currentShowFiltered, currentFilterUrl, currentClipShape) {
-		if (!map || !currentUrl) return;
+	// Given rows skip the fetch; otherwise the CSV at currentUrl is loaded.
+	async function fetchRows(currentUrl, currentRows) {
+		if (currentRows) return currentRows;
+		const res = await fetch(currentUrl);
+		return res.ok ? parseCsv(await res.text()) : null;
+	}
+
+	async function load(currentUrl, currentRows, currentCrs, currentShowFiltered, currentFilterUrl, currentClipShape) {
+		if (!map || (!currentUrl && !currentRows)) return;
 		const token = ++generation;
 		let result = null;
 		try {
 			const wantsPolygon = currentClipShape === 'plaza' && currentFilterUrl;
-			const [res, polygonRings] = await Promise.all([
-				fetch(currentUrl),
+			const [rawRows, polygonRings] = await Promise.all([
+				fetchRows(currentUrl, currentRows),
 				wantsPolygon ? loadPolygon(currentFilterUrl) : Promise.resolve(null)
 			]);
-			if (res.ok) {
-				result = buildGeoJson(
-					parseCsv(await res.text()),
-					currentCrs,
-					currentShowFiltered,
-					currentClipShape,
-					polygonRings
-				);
+			if (rawRows) {
+				result = buildGeoJson(rawRows, currentCrs, currentShowFiltered, currentClipShape, polygonRings);
 			}
 		} catch (err) {
-			console.warn(`heatmap: failed to load ${currentUrl}`, err);
+			console.warn(`heatmap: failed to load ${currentRows ? 'grid rows' : currentUrl}`, err);
 		}
 
 		await mapReady();
@@ -303,7 +303,7 @@
 	let layerReady = $state(false);
 
 	$effect(() => {
-		load(url, crs, showFiltered, filterUrl, clipShape);
+		load(url, rows, crs, showFiltered, filterUrl, clipShape);
 	});
 
 	// Repaint on its own, so dragging the scale limits never refetches the CSV.

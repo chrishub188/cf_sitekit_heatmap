@@ -7,6 +7,8 @@ import { haversine, M_PER_DEG } from '$lib/geo.js';
 const SIZE = 100; // metres per side, the default close-up crop
 const FULL_SIZE = 300; // metres per side, the full extent the source CSVs cover
 export const RADIUS = 50; // metres, for the circular clip shape
+// metres; a recalculated grid covers the same square as the full crop
+export const SIMULATION_RADIUS = FULL_SIZE / 2;
 
 /** @param {number[]} center @param {number} [size] @returns {number[]} */
 const bbox = ([lng, lat], size = SIZE) => {

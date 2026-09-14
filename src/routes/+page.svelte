@@ -10,9 +10,12 @@
 	import LogDropZone from '$lib/components/LogDropZone.svelte';
 	import LogRow from '$lib/components/LogRow.svelte';
 	import Legend from '$lib/components/Legend.svelte';
+	import AiWatermark from '$lib/components/AiWatermark.svelte';
 	import { customStyle } from '$lib/style.js';
-	import { SITES, RESOLUTIONS, CLIP_SHAPES, RADIUS, nearestSite } from '$lib/sites.js';
+	import { SITES, RESOLUTIONS, CLIP_SHAPES, RADIUS, SIMULATION_RADIUS, nearestSite } from '$lib/sites.js';
 	import { parseLogfile, readLogFile } from '$lib/logfile.js';
+	import { clipTest } from '$lib/clip.js';
+	import { gridToRows, requestEnvGrid } from '$lib/envgrid.js';
 
 	let active = $state(0);
 	let resolution = $state('5m');
@@ -32,7 +35,14 @@
 	// adopted by the nearest of the three sites, or rejected, so the map only
 	// ever frames a site we have data for.
 	let log = $state(
-		/** @type {({ name: string } & import('$lib/logfile.js').ParsedLog) | null} */ (null)
+		/** @type {({ name: string, site: number } & import('$lib/logfile.js').ParsedLog) | null} */ (null)
+	);
+	// The log's site rerun with its trees in place. Raw state: a 300 m grid is
+	// ~90k rows, far too many to wrap in reactive proxies.
+	let simulation = $state.raw(
+		/** @type {{ status: 'loading' | 'ready' | 'error', grid: ReturnType<typeof gridToRows> | null, message: string | null } | null} */ (
+			null
+		)
 	);
 	/** @type {string | null} */
 	let logError = $state(null);
@@ -45,6 +55,49 @@
 	// The 'full' shape swaps in the wider rect for both the clip and the camera;
 	// plaza and circle keep the 100 m framing they already assume.
 	const viewBounds = $derived(clipShape === 'full' ? site.fullBounds : site.bounds);
+	// Only the log's own site swaps in the recalculated grid; the other tabs, and
+	// this one until the backend answers, keep showing the static data.
+	const simulated = $derived(
+		log?.site === active && simulation?.status === 'ready' ? simulation.grid : null
+	);
+
+	// One request per loaded log, cancelled if the log is cleared or replaced
+	// before the backend answers.
+	$effect(() => {
+		if (!log) {
+			simulation = null;
+			return;
+		}
+		const logSite = SITES[log.site];
+		// The grid spans the full crop, so only trees inside it can affect it.
+		const inGrid = clipTest('full', { bounds: logSite.fullBounds });
+		const trees = log.interventions.filter((t) => !inGrid || inGrid(t.lon, t.lat));
+		if (trees.length === 0) {
+			simulation = null;
+			return;
+		}
+
+		const controller = new AbortController();
+		simulation = { status: 'loading', grid: null, message: null };
+		requestEnvGrid(
+			{
+				center: [logSite.center[0], logSite.center[1]],
+				radius: SIMULATION_RADIUS,
+				gridType: 'PET',
+				interventions: trees.map(({ type, lat, lon, isNew }) => ({ type, lat, lon, isNew }))
+			},
+			controller.signal
+		)
+			.then((grid) => {
+				simulation = { status: 'ready', grid: gridToRows(grid), message: null };
+			})
+			.catch((err) => {
+				if (controller.signal.aborted) return;
+				console.warn('simulation failed', err);
+				simulation = { status: 'error', grid: null, message: err instanceof Error ? err.message : String(err) };
+			});
+		return () => controller.abort();
+	});
 
 	// One place to land in: a rejected file never leaves a half-loaded log behind.
 	function reportError(message) {
@@ -81,7 +134,7 @@
 		}
 
 		logError = null;
-		log = { name, ...parsed };
+		log = { name, site: match.index, ...parsed };
 		// Start at the full count so the row never briefly shows the previous
 		// log's "n of m" before the overlay reports back.
 		shownTrees = parsed.interventions.length;
@@ -111,7 +164,9 @@
 		<Heatmap
 			{map}
 			url={site.data[resolution]}
-			{crs}
+			rows={simulated?.rows ?? null}
+			crs={simulated ? 'epsg25832' : crs}
+			pitch={simulated?.pitch ?? 1}
 			bounds={viewBounds}
 			filterUrl={site.filterUrl}
 			center={site.center}
@@ -137,6 +192,7 @@
 			/>
 		{/if}
 	{/if}
+	<AiWatermark />
 	<LogDropZone onfile={loadFile} onerror={reportError} />
 	<SiteSwitch sites={SITES} {active} onselect={(i) => (active = i)} />
 	<ResolutionSwitch resolutions={RESOLUTIONS} active={resolution} onselect={(id) => (resolution = id)} />
@@ -166,6 +222,8 @@
 			shown={shownTrees}
 			entries={log?.entries.length ?? 0}
 			error={logError}
+			simulation={log?.site === active ? (simulation?.status ?? null) : null}
+			simulationError={simulation?.message ?? null}
 			{mode}
 			onmode={(m) => (mode = m)}
 			onfile={loadFile}

@@ -23,7 +23,7 @@
  */
 
 // Every intervention is drawn at the same crown size, whatever its type.
-export const CROWN_RADIUS_M = 6;
+export const CROWN_RADIUS_M = 3;
 
 export const MAX_LOG_BYTES = 25 * 1024 * 1024;
 

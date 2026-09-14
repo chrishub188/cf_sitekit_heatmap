@@ -3,6 +3,9 @@
 
 export const M_PER_DEG = 111320; // metres per degree of latitude
 export const EARTH_RADIUS = 6371000; // metres
+// ETRS89 / UTM zone 32N — covers every site (Mannheim, Kaiserslautern). The
+// 1 m CSVs and the simulation backend's grids are both laid out in it.
+export const EPSG25832 = '+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs';
 
 // Great-circle distance between two lon/lat points, in metres.
 /** @param {number} lng1 @param {number} lat1 @param {number} lng2 @param {number} lat2 */
