@@ -2,6 +2,7 @@
 	import { onDestroy } from 'svelte';
 	import { scaleSequential, interpolateRdYlBu } from 'd3';
 	import proj4 from 'proj4';
+	import { clipTest, loadPolygon } from '$lib/clip.js';
 
 	let {
 		map, // maplibre Map instance (from SiteMap's onready)
@@ -13,9 +14,10 @@
 		center, // [lng, lat] site centre, used when clipShape is 'circle'
 		radius = 100, // metres, radius of the 'circle' clip shape
 		clipShape = 'square', // 'square'/'full': clip to bounds — 'plaza': clip to the filterUrl polygon — 'circle': clip to radius around center
-		beforeId = 'site-marker', // insert below the site chrome so labels stay legible
+		beforeId = 'overlay-anchor', // insert below the anchor so overlays stack predictably
 		excludeNtzg = [20, 21, 30, 32],
 		showFiltered = false, // show excluded-ntzg (Schwarzplan) and invalid-value cells as filtered overlay
+		visible = true, // false hides the layer but keeps the loaded data, the domain and the paint expression
 		gap = 0.9, // fraction of the grid pitch each cell fills; the rest is gap
 		roundness = 5, // superellipse exponent for cell corners; 2 = ellipse, higher = squarer
 		opacity = 0.35,
@@ -69,67 +71,6 @@
 			const s = Math.sin(theta);
 			return [Math.sign(c) * Math.abs(c) ** (2 / n), Math.sign(s) * Math.abs(s) ** (2 / n)];
 		});
-
-	// Even-odd ray cast; ring[0] is the outer boundary, any further rings are holes.
-	function pointInRing(x, y, ring) {
-		let inside = false;
-		for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-			const [xi, yi] = ring[i];
-			const [xj, yj] = ring[j];
-			const crosses = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
-			if (crosses) inside = !inside;
-		}
-		return inside;
-	}
-
-	function pointInPolygon(x, y, rings) {
-		if (!pointInRing(x, y, rings[0])) return false;
-		return !rings.slice(1).some((hole) => pointInRing(x, y, hole));
-	}
-
-	const EARTH_RADIUS = 6371000; // metres
-
-	// Great-circle distance between two lon/lat points, in metres.
-	function haversine(lng1, lat1, lng2, lat2) {
-		const toRad = (d) => (d * Math.PI) / 180;
-		const dLat = toRad(lat2 - lat1);
-		const dLng = toRad(lng2 - lng1);
-		const a =
-			Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-		return 2 * EARTH_RADIUS * Math.asin(Math.sqrt(a));
-	}
-
-	function clipTest(currentClipShape, { bounds, polygonRings, center, radius }) {
-		if (currentClipShape === 'plaza' && polygonRings) return (r) => pointInPolygon(r.x, r.y, polygonRings);
-		if (currentClipShape === 'circle' && center) {
-			const [clng, clat] = center;
-			return (r) => haversine(r.x, r.y, clng, clat) <= radius;
-		}
-		if (!bounds) return null;
-		const [west, south, east, north] = bounds;
-		return (r) => r.x >= west && r.x <= east && r.y >= south && r.y <= north;
-	}
-
-	// Fetched once per filterUrl and kept for the component's lifetime.
-	const polygonCache = new Map();
-
-	async function loadPolygon(currentFilterUrl) {
-		if (!currentFilterUrl) return null;
-		if (polygonCache.has(currentFilterUrl)) return polygonCache.get(currentFilterUrl);
-		let rings = null;
-		try {
-			const res = await fetch(currentFilterUrl);
-			if (res.ok) {
-				const geojson = await res.json();
-				const geometry = geojson.features?.[0]?.geometry;
-				if (geometry?.type === 'Polygon') rings = geometry.coordinates;
-			}
-		} catch (err) {
-			console.warn(`heatmap: failed to load filter polygon ${currentFilterUrl}`, err);
-		}
-		polygonCache.set(currentFilterUrl, rings);
-		return rings;
-	}
 
 	function median(values) {
 		const sorted = [...values].sort((a, b) => a - b);
@@ -216,8 +157,8 @@
 		let filtered = currentShowFiltered ? rows.filter(isFiltered) : [];
 		const inBounds = clipTest(currentClipShape, { bounds, polygonRings, center, radius });
 		if (inBounds) {
-			included = included.filter(inBounds);
-			filtered = filtered.filter(inBounds);
+			included = included.filter((r) => inBounds(r.x, r.y));
+			filtered = filtered.filter((r) => inBounds(r.x, r.y));
 		}
 		if (included.length === 0 && filtered.length === 0) return null;
 
@@ -284,6 +225,7 @@
 					id: LAYER_ID,
 					type: 'fill',
 					source: SOURCE_ID,
+					layout: { visibility: visible ? 'visible' : 'none' },
 					paint: {
 						'fill-color': interpolateRdYlBu(0.5), // replaced by the repaint effect below
 						'fill-opacity': ['case', ['==', ['get', 'filtered'], true], FILTERED_OPACITY, opacity]
@@ -370,6 +312,14 @@
 		const hi = scaleMax ?? dataDomain?.max;
 		if (!layerReady || lo == null || hi == null || !map.getLayer(LAYER_ID)) return;
 		map.setPaintProperty(LAYER_ID, 'fill-color', colorExpression(lo, hi));
+	});
+
+	// Hiding is a layout flip, not an unmount: the cells, their domain and the
+	// colour ramp all survive, so switching back is instant and the legend keeps
+	// showing the real range of the data it's describing.
+	$effect(() => {
+		if (!layerReady || !map.getLayer(LAYER_ID)) return;
+		map.setLayoutProperty(LAYER_ID, 'visibility', visible ? 'visible' : 'none');
 	});
 
 	onDestroy(() => {

@@ -2,10 +2,11 @@
 // files, so the boxes are rebuilt here — same square-metre convention the source
 // files used, which means SIZE and FULL_SIZE are the only numbers to touch.
 
+import { haversine, M_PER_DEG } from '$lib/geo.js';
+
 const SIZE = 100; // metres per side, the default close-up crop
 const FULL_SIZE = 300; // metres per side, the full extent the source CSVs cover
 export const RADIUS = 50; // metres, for the circular clip shape
-const M_PER_DEG = 111320;
 
 /** @param {number[]} center @param {number} [size] @returns {number[]} */
 const bbox = ([lng, lat], size = SIZE) => {
@@ -31,6 +32,13 @@ export const CLIP_SHAPES = [
 	{ id: 'full', label: `${FULL_SIZE} m` },
 	{ id: 'plaza', label: 'Plaza' },
 	{ id: 'circle', label: `Ø ${RADIUS} m` }
+];
+
+// What the map is currently showing. A dropped logfile adds 'trees'; with no
+// log loaded the switch isn't rendered and the heatmap is the only mode.
+export const OVERLAY_MODES = [
+	{ id: 'heatmap', label: 'Heatmap' },
+	{ id: 'trees', label: 'Trees' }
 ];
 
 export const SITES = [
@@ -98,3 +106,19 @@ export const SITE_AREAS = {
 		}
 	])
 };
+
+// A logfile carries its own centre, but the app only ever frames the three
+// sites above — so a log is adopted by the nearest one and rejected if it
+// belongs to none, rather than flying the camera somewhere with no data.
+export const SITE_MATCH_M = 150; // metres; half the width of the widest crop
+
+/** @param {number[]} center @param {number} [maxMeters] @returns {{ index: number, distance: number } | null} */
+export function nearestSite([lng, lat], maxMeters = SITE_MATCH_M) {
+	/** @type {{ index: number, distance: number } | null} */
+	let best = null;
+	for (const [index, site] of SITES.entries()) {
+		const distance = haversine(lng, lat, site.center[0], site.center[1]);
+		if (!best || distance < best.distance) best = { index, distance };
+	}
+	return best && best.distance <= maxMeters ? best : null;
+}

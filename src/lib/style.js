@@ -5,14 +5,19 @@ import { SITE_AREAS } from '$lib/sites.js';
 
 const SRC = 'versatiles-shortbread';
 
-const PAPER = '#F1EBDF';
+export const PAPER = '#F1EBDF';
 const PAVING = '#E5DBC7';
 const EDGE = '#D5C9B1';
-const INK = '#9A9081';
+export const INK = '#9A9081';
+// Planting greens. The fill is a muted sage that sits just above the basemap's
+// land-planting #CBD6BB, so a crown reads as canopy rather than as a marker;
+// the ink is the darker edge and centre dot drawn on top of it.
+export const PLANTING_FILL = '#9DB491';
+export const PLANTING_INK = '#6F8A57';
 
 // --- expression helpers ----------------------------------------------------
 const kind = (...kinds) => ['match', ['get', 'kind'], kinds, true, false];
-const zoom = (...stops) => ['interpolate', ['exponential', 1.6], ['zoom'], ...stops];
+export const zoom = (...stops) => ['interpolate', ['exponential', 1.6], ['zoom'], ...stops];
 
 // --- layer factories -------------------------------------------------------
 const fill = (id, layer, color, filter, paint) => ({
@@ -169,6 +174,11 @@ export const customStyle = {
 		// 		'line-dasharray': [5, 3]
 		// 	}
 		// },
+		// Ordering anchor for imperatively-added overlays: the heatmap grid inserts
+		// below it, the tree crowns above it, so neither can end up on top of the
+		// other by winning a race. Renders nothing.
+		{ id: 'overlay-anchor', type: 'background', layout: { visibility: 'none' }, paint: { 'background-color': PAPER } },
+
 		{
 			id: 'site-marker',
 			type: 'circle',

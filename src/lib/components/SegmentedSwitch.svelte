@@ -1,11 +1,13 @@
 <script>
-	let { shapes, active, onselect } = $props();
+	// A row of mutually exclusive buttons: {id, label}[]. Used for the clip
+	// shapes and for the overlay mode switch.
+	let { options, active, onselect } = $props();
 </script>
 
 <nav>
-	{#each shapes as shape}
-		<button class:on={shape.id === active} onclick={() => onselect?.(shape.id)}>
-			{shape.label}
+	{#each options as option}
+		<button class:on={option.id === active} onclick={() => onselect?.(option.id)}>
+			{option.label}
 		</button>
 	{/each}
 </nav>
