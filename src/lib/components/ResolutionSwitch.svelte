@@ -5,7 +5,7 @@
 <nav>
 	{#each resolutions as resolution}
 		<button class:on={resolution.id === active} onclick={() => onselect?.(resolution.id)}>
-			{resolution.label}
+			{resolution.label} <span class="unit">{resolution.unit}</span>
 		</button>
 	{/each}
 </nav>
@@ -41,5 +41,9 @@
 	button.on {
 		color: #f1ebdf;
 		background: #9a9081;
+	}
+
+	.unit {
+		text-transform: none;
 	}
 </style>

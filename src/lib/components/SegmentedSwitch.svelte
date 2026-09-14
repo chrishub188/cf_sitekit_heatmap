@@ -12,7 +12,7 @@
 			title={option.title}
 			onclick={() => onselect?.(option.id)}
 		>
-			{option.label}
+			{option.label}{#if option.unit}&nbsp;<span class="unit">{option.unit}</span>{/if}
 		</button>
 	{/each}
 </nav>
@@ -51,5 +51,9 @@
 	button.on {
 		color: #f1ebdf;
 		background: #9a9081;
+	}
+
+	.unit {
+		text-transform: none;
 	}
 </style>

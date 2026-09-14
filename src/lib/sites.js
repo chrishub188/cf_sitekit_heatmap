@@ -20,8 +20,8 @@ const bbox = ([lng, lat], size = SIZE) => {
 // Cell sizes the heatmap can be drawn at. The backend only computes 1 m cells;
 // coarser ones are averaged from them client-side — see gridToRows.
 export const RESOLUTIONS = [
-	{ id: '5m', label: '5 m', size: 5 },
-	{ id: '1m', label: '1 m', size: 1 }
+	{ id: '5m', label: '5', unit: 'm', size: 5 },
+	{ id: '1m', label: '1', unit: 'm', size: 1 }
 ];
 
 // Four ways to clip the data to a site: the square bbox (SIZE above), the full
@@ -29,10 +29,10 @@ export const RESOLUTIONS = [
 // site under filter_location/, or a RADIUS-metre circle around the centre
 // point. The two rectangles sit next to each other so they read as a pair.
 export const CLIP_SHAPES = [
-	{ id: 'square', label: `${SIZE} m` },
-	{ id: 'full', label: `${FULL_SIZE} m` },
+	{ id: 'square', label: `${SIZE}`, unit: 'm' },
+	{ id: 'full', label: `${FULL_SIZE}`, unit: 'm' },
 	{ id: 'plaza', label: 'Plaza' },
-	{ id: 'circle', label: `Ø ${RADIUS} m` }
+	{ id: 'circle', label: `Ø ${RADIUS}`, unit: 'm' }
 ];
 
 // What the map is currently showing. A dropped logfile adds 'trees'; with no
