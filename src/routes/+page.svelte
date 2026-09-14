@@ -18,9 +18,9 @@
 	import { gridToRows, requestEnvGrid } from '$lib/envgrid.js';
 
 	let active = $state(0);
-	let resolution = $state('5m');
-	let showFiltered = $state(false);
-	let clipShape = $state('square');
+	let resolution = $state('1m');
+	let showFiltered = $state(true);
+	let clipShape = $state('circle');
 	let map = $state(null);
 	/** @type {{ min: number, max: number } | null} */
 	let domain = $state(null);
