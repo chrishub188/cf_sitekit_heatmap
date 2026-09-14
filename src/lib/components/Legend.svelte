@@ -5,6 +5,8 @@
 		min, // effective low end of the colour scale (pinned value, or the data's own min); null when nothing is loaded and nothing is pinned
 		max, // effective high end, same rules
 		pinned = false, // true when either end has been set by hand — enables the reset
+		status = null, // 'loading' | 'error' while the grid on screen isn't there yet; shown inside the bar
+		statusMessage = null, // why loading failed, shown on hover
 		onmin, // called with a number, or null to hand that end back to the data
 		onmax,
 		onreset
@@ -49,7 +51,19 @@
 		value={fmt(min)}
 		onchange={commit(onmin)}
 	/>
-	<div class="bar" style:background={gradient}></div>
+	<!-- The status sits inside the bar rather than beside it, so the panel keeps
+	     its width while a grid loads. -->
+	<div
+		class="bar"
+		class:busy={status}
+		class:failed={status === 'error'}
+		title={status === 'error' ? statusMessage : null}
+	>
+		<span class="ramp" style:background={gradient}></span>
+		{#if status}
+			<span class="status">{status === 'error' ? 'No data' : 'Loading…'}</span>
+		{/if}
+	</div>
 	<input
 		class="value"
 		type="number"
@@ -108,10 +122,44 @@
 	}
 
 	.bar {
+		display: grid;
 		flex: 1;
 		min-width: 6rem;
 		height: 0.6rem;
+	}
+
+	.bar > * {
+		grid-area: 1 / 1;
+	}
+
+	.ramp {
 		border-radius: 1px;
+	}
+
+	.busy .ramp {
+		opacity: 0.25;
+	}
+
+	.status {
+		place-self: center;
+		font-size: 0.6rem;
+		letter-spacing: 0.09em;
+		text-transform: uppercase;
+		color: #6f665a;
+	}
+
+	.failed .status {
+		color: #a2503f;
+	}
+
+	.busy:not(.failed) .status {
+		animation: pulse 1.2s ease-in-out infinite alternate;
+	}
+
+	@keyframes pulse {
+		from {
+			opacity: 0.45;
+		}
 	}
 
 	.reset {

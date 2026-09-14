@@ -24,12 +24,12 @@
 	const tally = $derived(shown < count ? `${shown} of ${count} trees` : `${count} trees`);
 	const meta = $derived(entries > 1 ? `${entries} entries · ${tally}` : tally);
 	// Says which heatmap is on screen: while loading or after a failure it is
-	// still the static data, which would otherwise pass for the simulated one.
+	// still the baseline, which would otherwise pass for the simulated one.
 	/** @type {Record<string, string>} */
 	const SIMULATION_LABELS = {
 		loading: 'Simulating…',
 		ready: 'Simulated',
-		error: 'Static · sim failed'
+		error: 'Baseline · sim failed'
 	};
 
 	function pick(e) {

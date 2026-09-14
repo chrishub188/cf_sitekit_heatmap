@@ -1,4 +1,5 @@
-// Relays a grid recalculation to the simulation backend. The backend is plain
+// Relays a grid request — a site's baseline, or a rerun with trees — to the
+// simulation backend. The backend is plain
 // http without CORS, so a browser on the deployed (https) app can't reach it;
 // this route can. ENV_GRID_API_URL overrides the backend base URL.
 
@@ -19,7 +20,7 @@ const isCoord = (v, limit) => typeof v === 'number' && Number.isFinite(v) && Mat
 
 /** @param {any} body @returns {import('$lib/envgrid.js').EnvGridRequest | null} */
 function validate(body) {
-	const { center, radius, gridType, interventions } = body ?? {};
+	const { center, radius, gridType, interventions = [] } = body ?? {};
 	if (!Array.isArray(center) || !isCoord(center[0], 180) || !isCoord(center[1], 90)) return null;
 	if (typeof radius !== 'number' || !(radius > 0 && radius <= MAX_RADIUS_M)) return null;
 	if (!GRID_TYPES.includes(gridType)) return null;

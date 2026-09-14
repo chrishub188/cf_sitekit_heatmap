@@ -3,9 +3,10 @@
 A SvelteKit + MapLibre GL app for visualising urban thermal comfort (PET —
 Physiological Equivalent Temperature) as a heatmap over site plans.
 
-Each site is a small study area with a pre-computed PET grid. The map shows
-the site's outline and lets you switch between sites and between two grid
-resolutions; cells are colored on a red–blue scale (red = hotter/higher PET).
+Each site is a small study area whose PET grid is fetched from the simulation
+backend. The map shows the site's outline and lets you switch between sites
+and between two grid resolutions; cells are colored on a red–blue scale
+(red = hotter/higher PET).
 
 ## Sites & data
 
@@ -13,19 +14,22 @@ Sites are configured in [src/lib/sites.js](src/lib/sites.js):
 
 - **Dahlbergplatz** (Mannheim)
 - **Am Altenhof** (Kaiserslautern)
+- **TH-Vorplatz** (Mannheim)
 
-Each site ships two CSV grids under [static/data/](static/data/):
+Each site's grid comes from the backend's `calculateEnvGrid` endpoint
+(`gridType=PET`, 150 m radius around the site center), relayed through
+[/api/env-grid](src/routes/api/env-grid/+server.js) because the backend is
+plain http without CORS. Set `ENV_GRID_API_URL` to point the relay at a
+different backend. The backend returns 1 m cells in UTM zone 32N
+(EPSG:25832); the 5 m view averages them client-side
+([envgrid.js](src/lib/envgrid.js)). Cells without a value (buildings) are
+the ones the Schwarzplan toggle shows.
 
-- `5mx5m/` — 5 m grid, coordinates already in lon/lat (WGS84)
-- `1mx1m/` — 1 m grid, coordinates in UTM zone 32N (EPSG:25832), reprojected
-  client-side in [Heatmap.svelte](src/lib/components/Heatmap.svelte)
+Dropping a logfile of tree placements requests the same grid again with the
+trees as `interventions` and shows the recalculated heatmap for that site.
 
-Each CSV has `x`, `y`, and a `pet` (or `value`) column; an optional `ntzg`
-column flags land-use classes excluded from the heatmap by default.
-
-To add a new site: add its bounding-box center, label, and CSV paths to
-`SITES` in `src/lib/sites.js`, and drop the corresponding CSVs into
-`static/data/5mx5m/` and `static/data/1mx1m/`.
+To add a new site: add its bounding-box center, label, and plaza outline
+to `SITES` in `src/lib/sites.js`.
 
 [static/geojson/](static/geojson/) holds the original site-boundary GeoJSON
 files the bbox centers in `sites.js` were derived from. They're reference

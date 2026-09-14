@@ -37,13 +37,12 @@
 	let log = $state(
 		/** @type {({ name: string, site: number } & import('$lib/logfile.js').ParsedLog) | null} */ (null)
 	);
-	// The log's site rerun with its trees in place. Raw state: a 300 m grid is
-	// ~90k rows, far too many to wrap in reactive proxies.
-	let simulation = $state.raw(
-		/** @type {{ status: 'loading' | 'ready' | 'error', grid: ReturnType<typeof gridToRows> | null, message: string | null } | null} */ (
-			null
-		)
-	);
+	/** @typedef {{ status: 'loading' | 'ready' | 'error', grid: import('$lib/envgrid.js').EnvGrid | null, message: string | null }} GridState */
+	// The site on screen's baseline grid, fetched from the backend. Raw state: a
+	// 300 m grid is 90k values, far too many to wrap in reactive proxies.
+	let baseline = $state.raw(/** @type {(GridState & { site: number }) | null} */ (null));
+	// The log's site rerun with its trees in place.
+	let simulation = $state.raw(/** @type {GridState | null} */ (null));
 	/** @type {string | null} */
 	let logError = $state(null);
 	let mode = $state('heatmap');
@@ -51,15 +50,65 @@
 	const interventions = $derived(log?.interventions ?? []);
 
 	const site = $derived(SITES[active]);
-	const crs = $derived(RESOLUTIONS.find((r) => r.id === resolution).crs);
+	const cellSize = $derived(RESOLUTIONS.find((r) => r.id === resolution).size);
 	// The 'full' shape swaps in the wider rect for both the clip and the camera;
 	// plaza and circle keep the 100 m framing they already assume.
 	const viewBounds = $derived(clipShape === 'full' ? site.fullBounds : site.bounds);
 	// Only the log's own site swaps in the recalculated grid; the other tabs, and
-	// this one until the backend answers, keep showing the static data.
+	// this one until the backend answers, keep showing the baseline.
 	const simulated = $derived(
 		log?.site === active && simulation?.status === 'ready' ? simulation.grid : null
 	);
+	const baseGrid = $derived(
+		baseline?.site === active && baseline.status === 'ready' ? baseline.grid : null
+	);
+	const cells = $derived.by(() => {
+		const grid = simulated ?? baseGrid;
+		return grid ? gridToRows(grid, cellSize) : null;
+	});
+
+	// Each backend call opens a new session and takes seconds, so a site's
+	// baseline is fetched once per page load and reused on every revisit. A
+	// failed request is dropped from the cache, so coming back to the tab retries.
+	/** @type {Map<string, Promise<import('$lib/envgrid.js').EnvGrid>>} */
+	const baselineCache = new Map();
+
+	/** @param {(typeof SITES)[number]} s */
+	function fetchBaseline(s) {
+		let pending = baselineCache.get(s.id);
+		if (!pending) {
+			pending = requestEnvGrid({
+				center: [s.center[0], s.center[1]],
+				radius: SIMULATION_RADIUS,
+				gridType: 'PET',
+				interventions: []
+			});
+			pending.catch(() => baselineCache.delete(s.id));
+			baselineCache.set(s.id, pending);
+		}
+		return pending;
+	}
+
+	// Not aborted on a tab switch: the answer still lands in the cache, ready
+	// for when the user comes back.
+	$effect(() => {
+		const index = active;
+		let current = true;
+		baseline = { site: index, status: 'loading', grid: null, message: null };
+		fetchBaseline(SITES[index])
+			.then((grid) => {
+				if (current) baseline = { site: index, status: 'ready', grid, message: null };
+			})
+			.catch((err) => {
+				if (!current) return;
+				console.warn('baseline grid failed', err);
+				const message = err instanceof Error ? err.message : String(err);
+				baseline = { site: index, status: 'error', grid: null, message };
+			});
+		return () => {
+			current = false;
+		};
+	});
 
 	// One request per loaded log, cancelled if the log is cleared or replaced
 	// before the backend answers.
@@ -89,7 +138,7 @@
 			controller.signal
 		)
 			.then((grid) => {
-				simulation = { status: 'ready', grid: gridToRows(grid), message: null };
+				simulation = { status: 'ready', grid, message: null };
 			})
 			.catch((err) => {
 				if (controller.signal.aborted) return;
@@ -163,10 +212,8 @@
 	{#if map}
 		<Heatmap
 			{map}
-			url={site.data[resolution]}
-			rows={simulated?.rows ?? null}
-			crs={simulated ? 'epsg25832' : crs}
-			pitch={simulated?.pitch ?? 1}
+			rows={cells?.rows ?? null}
+			pitch={cells?.pitch ?? 1}
 			bounds={viewBounds}
 			filterUrl={site.filterUrl}
 			center={site.center}
@@ -203,6 +250,8 @@
 			min={scaleMin ?? domain?.min ?? null}
 			max={scaleMax ?? domain?.max ?? null}
 			pinned={scaleMin != null || scaleMax != null}
+			status={simulated || baseline?.status === 'ready' ? null : (baseline?.status ?? null)}
+			statusMessage={baseline?.message ?? null}
 			onmin={(v) => (scaleMin = v)}
 			onmax={(v) => (scaleMax = v)}
 			onreset={() => {
