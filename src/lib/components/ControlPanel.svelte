@@ -13,11 +13,17 @@
 		position: absolute;
 		bottom: 1rem;
 		left: 1rem;
-		/* sized by the widest row, but never narrower than a readable gradient */
+		/* sized by the widest row; the legend bar keeps its own minimum */
 		width: fit-content;
-		min-width: 23rem;
 		border: 2px solid #cdc1a9;
 		background: #f1ebdf;
+	}
+
+	/* Tighter than the switches out on the map: the clip-shape row sets the
+	   panel's width, so its padding is what keeps the box compact. */
+	.panel :global(nav button),
+	.panel :global(label) {
+		padding-inline: 0.7rem;
 	}
 
 	/* Hairline between the scale row and the clipping row. */

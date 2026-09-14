@@ -19,17 +19,16 @@
 	/** @type {HTMLInputElement} */
 	let picker;
 
-	// Clipped-away trees would otherwise read as a bug, so say so whenever the
-	// shape on screen is hiding some.
+	// The row shows just the filename; the counts live in the tooltip. Clipped-away
+	// trees would otherwise read as a bug, so that one tally stays visible.
 	const tally = $derived(shown < count ? `${shown} of ${count} trees` : `${count} trees`);
-	const meta = $derived(entries > 1 ? `${entries} entries · ${tally}` : tally);
-	// Says which heatmap is on screen: while loading or after a failure it is
-	// still the baseline, which would otherwise pass for the simulated one.
+	const details = $derived([name, entries > 1 ? `${entries} entries` : null, tally].filter(Boolean).join(' · '));
+	// Only the in-between states need a label: once the rerun is ready the
+	// Before/After switch at the top already says which grid is on screen.
 	/** @type {Record<string, string>} */
 	const SIMULATION_LABELS = {
 		loading: 'Simulating…',
-		ready: 'Simulated',
-		error: 'Baseline · sim failed'
+		error: 'Sim failed'
 	};
 
 	function pick(e) {
@@ -45,14 +44,14 @@
 		<p class="error">{error}</p>
 	{:else if name}
 		<SegmentedSwitch options={OVERLAY_MODES} active={mode} onselect={onmode} />
-		{#if simulation}
+		{#if SIMULATION_LABELS[simulation]}
 			<span
 				class="sim"
 				class:failed={simulation === 'error'}
 				title={simulation === 'error' ? simulationError : null}>{SIMULATION_LABELS[simulation]}</span
 			>
 		{/if}
-		<span class="meta" title={name}>{meta} · {name}</span>
+		<span class="meta" title={details}>{shown < count ? `${tally} · ` : ''}{name}</span>
 	{:else}
 		<!-- No log yet: the row is the affordance, since drag and drop alone
 		     leaves nothing to discover. -->
@@ -71,6 +70,13 @@
 	.row {
 		display: flex;
 		align-items: center;
+	}
+
+	/* Same hairline as the one before the Schwarzplan toggle, so the filename
+	   doesn't read as a third button in the mode switch. */
+	.row > :global(nav) {
+		align-self: stretch;
+		border-right: 1px solid #cdc1a9;
 	}
 
 	.meta,
@@ -103,11 +109,12 @@
 		white-space: nowrap;
 	}
 
-	/* The panel is width:fit-content, so an unbounded filename would widen the
-	   whole box and reflow the legend gradient above it. */
+	/* The panel is width:fit-content. A zero base width keeps the filename out of
+	   that measurement: it fills whatever the other rows leave and ellipsizes. */
 	.meta {
+		flex: 1 1 0;
+		width: 0;
 		overflow: hidden;
-		max-width: 12rem;
 		text-overflow: ellipsis;
 	}
 

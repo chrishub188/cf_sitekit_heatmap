@@ -31,7 +31,7 @@
 		border: 1px solid #cdc1a9;
 		border-radius: 999px;
 		writing-mode: vertical-rl;
-		transform: translateY(-50%);
+		transform: translateY(-50%) rotate(180deg);
 		font: 400 0.62rem/1.2 ui-sans-serif, system-ui, sans-serif;
 		letter-spacing: 0.09em;
 		text-transform: uppercase;
