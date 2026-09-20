@@ -3,42 +3,32 @@
 	import Heatmap from '$lib/components/Heatmap.svelte';
 	import LocationMarker from '$lib/components/LocationMarker.svelte';
 	import { customStyle } from '$lib/style.js';
-	import { RADIUS, NO_DATA_SIZE, siteForLocation, frameBbox } from '$lib/sites.js';
+	import { RADIUS, SIZE, frameBbox } from '$lib/viewport.js';
 	import { location } from '$lib/location.js';
 	import { heading, needsCompassPrompt, requestHeadingPermission } from '$lib/heading.js';
+	import { GRID_MODE } from '$lib/gridConfig.js';
+	import { apiSource, gridAttempt, gridEpoch } from '$lib/gridSource.js';
 
 	let map = $state(null);
-	let site = $state(null); // whichever SITES entry's real bbox contains $location, or null if none does
 
-	// Once the first fix arrives, the matched site, the marker, the heatmap's
-	// radial clip, and the camera itself all follow the live location.
-	$effect(() => {
-		if (!$location) return;
-		// Only replace `site` when the match actually changes — siteForLocation
-		// returns a fresh object/bounds array every call, and reassigning it
-		// every tick (even to an equivalent site) would retrigger SiteMap's
-		// fitBounds effect and fight the marker's own camera-follow easeTo.
-		siteForLocation($location).then((match) => {
-			if (match?.id !== site?.id) site = match;
-		});
+	// Where the heatmap's readings come from. A new descriptor per fix is fine
+	// and deliberate: gridSource keeps the request anchored until the visitor
+	// has walked far enough to need a new grid, so the *key* only changes when
+	// a fetch is actually warranted, and Heatmap gates on the key.
+	let source = $derived.by(() => {
+		if (!$location || GRID_MODE === 'off') return null;
+		return apiSource([$location.lng, $location.lat], $gridEpoch, $gridAttempt);
 	});
 
-	// No matched site means no survey data for the current fix — still frame
-	// the camera around the visitor once so the marker has somewhere to sit.
-	// Only set on the first no-site fix (not every tick): frameBbox returns a
-	// fresh array each call, and re-flying the camera on every GPS jitter would
-	// fight the marker's own camera-follow easeTo, same as the `site` guard above.
+	// The camera frames a SIZE-metre crop around the visitor, set once on the
+	// first fix: frameBbox returns a fresh array each call, and re-framing on
+	// every GPS jitter would fight the marker's own camera-follow below. There
+	// is no site-specific crop any more — data is no longer confined to a site,
+	// so the frame follows the person rather than a surveyed rectangle.
 	let bounds = $state(null);
-	let bearing = $state(0);
 
 	$effect(() => {
-		if (site) {
-			bounds = site.bounds;
-			bearing = site.bearing;
-		} else if ($location && !bounds) {
-			bounds = frameBbox([$location.lng, $location.lat], NO_DATA_SIZE);
-			bearing = 0;
-		}
+		if ($location && !bounds) bounds = frameBbox([$location.lng, $location.lat], SIZE);
 	});
 
 	// Camera follow — keyed to $location only. Deliberately not re-run on
@@ -68,10 +58,10 @@
 
 <div class="stage">
 	{#if bounds}
-		<SiteMap mapStyle={customStyle} {bounds} {bearing} onready={(m) => (map = m)} />
+		<SiteMap mapStyle={customStyle} {bounds} onready={(m) => (map = m)} />
 	{/if}
-	{#if map && $location && site}
-		<Heatmap {map} url={site.data} center={[$location.lng, $location.lat]} radius={RADIUS} />
+	{#if map && $location && source}
+		<Heatmap {map} {source} center={[$location.lng, $location.lat]} radius={RADIUS} />
 	{/if}
 	{#if map && $location}
 		<LocationMarker {map} location={$location} heading={$heading} />

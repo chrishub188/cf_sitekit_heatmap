@@ -5,7 +5,7 @@
 
 	let {
 		map, // maplibre Map instance (from SiteMap's onready)
-		url, // prepared grid JSON (EPSG:4326) — see scripts/prepare-data.js
+		source, // { key, center, radius, load } — where the readings come from, see gridSource.js
 		center, // [lng, lat] centre of the radial clip — updates as the visitor's location changes
 		radius = 50, // metres, radius of the clip circle around center
 		beforeId = 'location-marker-halo', // insert below the location marker so it stays legible
@@ -25,7 +25,7 @@
 	// be inside the current clip circle makes the same cell change colour as
 	// the visitor walks, so the same colour means a different temperature from
 	// one moment to the next. Fixed ends make colours comparable across
-	// positions and across sites. Readings outside the range are clamped to the
+	// positions and across grids. Readings outside the range are clamped to the
 	// end colours. Change these two numbers to retune the scale.
 	const PET_MIN = 32; // blue end
 	const PET_MAX = 45; // red end
@@ -39,9 +39,19 @@
 	// actually moved this far; standing still costs nothing at all.
 	const MIN_CLIP_MOVE_M = 2;
 
-	// Owns loading the prepared grid and selecting the cells inside the radial
-	// clip — this component only applies the result to MapLibre.
-	const heatmapData = createHeatmapData();
+	// Owns loading the grid and selecting the cells inside the radial clip —
+	// this component only applies the result to MapLibre.
+	//
+	// The callback is the one case where the clip has to be rebuilt without the
+	// visitor having moved: a grid fetched in the background has landed, so the
+	// same centre now yields better data. Rebuilt directly rather than by
+	// poking a reactive flag — there is nothing to react to, and the effect
+	// below would have to be taught to ignore its own movement gate.
+	const heatmapData = createHeatmapData(() => {
+		if (!builtFor || !builtSource) return;
+		if (building) queued = { center: builtFor, source: builtSource };
+		else build(builtFor, builtSource);
+	});
 
 	// Colour lives in the paint property rather than in each feature, so the
 	// cell geometry stays constant and can be cached across clip updates.
@@ -85,9 +95,11 @@
 	let latest = null; // newest clip result, read by apply() so a deferred apply can't use stale data
 	/** @type {[number, number] | null} */
 	let builtFor = null; // centre `latest` was built for
-	let builtUrl = null;
+	let builtKey = null; // key of the source `latest` was built from
+	/** @type {any} */
+	let builtSource = null; // and the source itself, for a rebuild nobody asked for
 	let building = false;
-	/** @type {{ center: [number, number], url: string } | null} */
+	/** @type {{ center: [number, number], source: any } | null} */
 	let queued = null; // newest request made while a build was in flight
 
 	function movedEnough(from, to) {
@@ -98,23 +110,27 @@
 	}
 
 	function apply() {
+		// Nothing to show yet — leave whatever is on screen alone rather than
+		// blanking the layer while a grid is still on its way.
+		if (!latest) return;
 		ensureLayer();
-		map.getSource(SOURCE_ID)?.setData(latest ?? { type: 'FeatureCollection', features: [] });
+		map.getSource(SOURCE_ID)?.setData(latest);
 	}
 
 	// One build at a time, and only the newest requested centre is ever queued —
 	// otherwise a burst of position updates piles up builds that are already
 	// obsolete by the time they run.
-	async function build(target, targetUrl) {
+	async function build(target, targetSource) {
 		building = true;
 		try {
-			latest = await heatmapData.refresh(targetUrl, target, radius, {
+			latest = await heatmapData.refresh(targetSource, target, radius, {
 				gap,
 				roundness,
 				excludeNtzg
 			});
 			builtFor = target;
-			builtUrl = targetUrl;
+			builtKey = targetSource.key;
+			builtSource = targetSource;
 			// isStyleLoaded() can flicker back to false later (e.g. while new tiles
 			// stream in as the camera moves) — 'load' only ever fires once, so once
 			// the layer exists we know the style loaded and can skip that flaky gate.
@@ -124,28 +140,28 @@
 			building = false;
 			const next = queued;
 			queued = null;
-			if (next) build(next.center, next.url);
+			if (next) build(next.center, next.source);
 		}
 	}
 
-	// Applied from refresh()'s resolved value rather than the store's subscribe
-	// — subscribe fires synchronously with whatever's already in the store, but
-	// ensureLayer's beforeId lookup needs LocationMarker's layer to exist first.
-	// The load is async even when the grid is already cached (refresh awaits a
-	// promise), and LocationMarker's own layer-adding effect is synchronous, so
-	// it always wins that race.
+	// Applied from refresh()'s resolved value rather than a store subscription
+	// — a subscription fires synchronously with whatever's already in the
+	// store, but ensureLayer's beforeId lookup needs LocationMarker's layer to
+	// exist first. The load is async even when the grid is already cached
+	// (refresh awaits a promise), and LocationMarker's own layer-adding effect
+	// is synchronous, so it always wins that race.
 	$effect(() => {
 		if (!map) return;
 		const target = /** @type {[number, number]} */ (center);
-		const targetUrl = url;
-		// A different site is a hard rebuild — the movement gate doesn't apply.
-		if (targetUrl !== builtUrl) {
+		const targetSource = source;
+		// A different grid is a hard rebuild — the movement gate doesn't apply.
+		if (targetSource.key !== builtKey) {
 			builtFor = null;
 			queued = null;
 		} else if (!movedEnough(builtFor, target)) return;
 
-		if (building) queued = { center: target, url: targetUrl };
-		else build(target, targetUrl);
+		if (building) queued = { center: target, source: targetSource };
+		else build(target, targetSource);
 	});
 
 	onDestroy(() => {

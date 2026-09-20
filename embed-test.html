@@ -1,24 +1,222 @@
 <!doctype html>
 <html>
 <head><title>embed test</title></head>
-<body style="margin:0">
-<div style="padding:8px;font-family:sans-serif">
-	<button id="move">post new lat/lng/heading</button>
-	<span id="status"></span>
+<body>
+<div class="panel">
+	<div class="row">
+		<label>origin <input id="origin" size="26" value="http://localhost:5173"></label>
+		<label>site
+			<select id="site">
+				<option value="dalbergplatz">Dalbergplatz</option>
+				<option value="am-altenhof">Am Altenhof</option>
+				<option value="th-vorplatz">TH-Vorplatz</option>
+			</select>
+		</label>
+		<label>grid <select id="grid"><option>api</option><option>off</option></select></label>
+		<label>gridradius <input id="radius" type="number" min="60" max="300" step="10" value="100" size="4"></label>
+		<label>gridtype
+			<select id="type">
+				<option>PET</option>
+				<option>TEMPERATURE_CELSIUS</option>
+				<option>HUMIDITY</option>
+				<option>NOISE</option>
+				<option>CO2</option>
+				<option>FEELGOOD_FACTOR</option>
+				<option>SEALED_GROUND_CATEGORY</option>
+			</select>
+		</label>
+		<button id="load">Load</button>
+	</div>
+
+	<div class="row">
+		<button id="step">Step 5 m</button>
+		<button id="walk">Walk ▶</button>
+		<button id="turn">Turn in place ▶</button>
+		<button id="orbit">Orbit + jitter ▶</button>
+		<button id="stop">Stop</button>
+		<span class="sep"></span>
+		<label>speed <input id="speed" type="number" min="0.5" max="20" step="0.5" value="1.4" size="3"> m/s</label>
+		<span class="sep"></span>
+		<button id="refresh">post refreshGrid</button>
+	</div>
+
+	<div class="row">
+		<label>heading <input id="headingSlider" type="range" min="0" max="359" value="45"></label>
+		<output id="status"></output>
+	</div>
+
+	<p class="hint">
+		Watch the Network panel for <code>/api/grid</code>. Expect one request on load and
+		then roughly one per 40 m walked — never one per pose, and none at all while turning
+		in place. Only PET has a tuned colour ramp; the other grid types will look wrong.
+	</p>
 </div>
-<iframe id="f" src="http://localhost:5173/?lat=49.486004875&lng=8.466304325&heading=45" style="width:100%;height:80vh;border:1px solid #ccc"></iframe>
+
+<iframe id="f"></iframe>
+
 <script>
-	let n = 0;
-	document.getElementById('move').onclick = () => {
-		n++;
-		const lat = 49.486004875 + n * 0.0003;
-		const lng = 8.466304325 + n * 0.0003;
-		const heading = (45 + n * 30) % 360;
-		document.getElementById('f').contentWindow.postMessage(
-			{ source: 'cf-temperature-map', lat, lng, heading }, '*'
-		);
-		document.getElementById('status').textContent = `sent lat=${lat.toFixed(6)} lng=${lng.toFixed(6)} heading=${heading}`;
+	// Drives the app the way the Meta Quest host does: pose messages at 5 Hz over
+	// postMessage, with the initial pose on the iframe's query string.
+	//
+	// The modes exist to separate things the app treats very differently:
+	//   Walk   — position changes, so the clip rebuilds and, every ~40 m, a new
+	//            grid is fetched. This is the one that exercises the API.
+	//   Turn   — heading only. Nothing about the grid should move at all.
+	//   Orbit  — the old jitter test: a small circle plus GPS noise, which stays
+	//            inside one fetched grid and should never trigger a second request.
+
+	const HZ = 5;
+	const M_PER_DEG = 111320;
+
+	// Centres derived from each survey's own extent (see scripts/check-grid-orientation.js).
+	const SITES = {
+		'dalbergplatz': [49.486029348, 8.466325401],
+		'am-altenhof': [49.444292086, 7.7684939704],
+		'th-vorplatz': [49.469465998, 8.483344056]
 	};
+
+	const el = (id) => document.getElementById(id);
+	const frame = el('f');
+
+	let lat = 0, lng = 0, heading = 45;
+	let start = null, walked = 0, id = 0, posted = 0;
+	let mode = 'idle', timer = null, ready = false, tick = 0;
+
+	const mPerDegLng = () => M_PER_DEG * Math.cos((lat * Math.PI) / 180);
+	const metresFromStart = () =>
+		start ? Math.hypot((lng - start[1]) * mPerDegLng(), (lat - start[0]) * M_PER_DEG) : 0;
+
+	function show(note) {
+		el('status').textContent =
+			`${lat.toFixed(6)}, ${lng.toFixed(6)}  hdg ${heading.toFixed(0)}°  ` +
+			`walked ${walked.toFixed(1)} m  from start ${metresFromStart().toFixed(1)} m  ` +
+			`${posted} posts${note ? '  — ' + note : ''}`;
+	}
+
+	function post(extra) {
+		if (!ready) return show('iframe not loaded yet — press Load');
+		frame.contentWindow.postMessage(
+			{ source: 'cf-temperature-map', lat, lng, heading, t: performance.now(), id: id++, ...extra },
+			'*'
+		);
+		posted++;
+		show();
+	}
+
+	function load() {
+		const [siteLat, siteLng] = SITES[el('site').value];
+		lat = siteLat;
+		lng = siteLng;
+		heading = Number(el('headingSlider').value);
+		start = [lat, lng];
+		walked = 0;
+		posted = 0;
+		ready = false;
+		stop();
+
+		const url = new URL(el('origin').value);
+		url.searchParams.set('lat', lat);
+		url.searchParams.set('lng', lng);
+		url.searchParams.set('heading', heading);
+		url.searchParams.set('grid', el('grid').value);
+		url.searchParams.set('gridradius', el('radius').value);
+		url.searchParams.set('gridtype', el('type').value);
+		frame.src = url.toString();
+		show('loading…');
+	}
+
+	frame.onload = () => {
+		ready = true;
+		show('loaded');
+	};
+
+	function run(next) {
+		stop();
+		mode = next;
+		tick = 0;
+		timer = setInterval(step, 1000 / HZ);
+		el(next).textContent = el(next).textContent.replace('▶', '■');
+	}
+
+	function stop() {
+		clearInterval(timer);
+		timer = null;
+		mode = 'idle';
+		for (const b of ['walk', 'turn', 'orbit']) el(b).textContent = el(b).textContent.replace('■', '▶');
+	}
+
+	function advance(metres, bearingDeg) {
+		const rad = (bearingDeg * Math.PI) / 180;
+		lat += (metres * Math.cos(rad)) / M_PER_DEG;
+		lng += (metres * Math.sin(rad)) / mPerDegLng();
+		walked += metres;
+	}
+
+	function step() {
+		tick++;
+		if (mode === 'walk') {
+			advance(Number(el('speed').value) / HZ, heading);
+			post();
+		} else if (mode === 'turn') {
+			// Heading only — the app must not touch the grid for this.
+			heading = (heading + 4) % 360;
+			el('headingSlider').value = heading;
+			post();
+		} else if (mode === 'orbit') {
+			// A standing visitor's GPS noise plus a slow drift, all well inside one
+			// fetched grid: the case where the app should make no requests at all.
+			const [siteLat, siteLng] = start;
+			lat = siteLat + Math.sin(tick / 40) * 0.0002 + (Math.random() - 0.5) * 0.000002;
+			lng = siteLng + Math.cos(tick / 40) * 0.0003 + (Math.random() - 0.5) * 0.000002;
+			heading = (tick * 8) % 360;
+			el('headingSlider').value = heading;
+			post();
+		}
+	}
+
+	el('load').onclick = load;
+	el('site').onchange = load;
+	el('grid').onchange = load;
+	el('radius').onchange = load;
+	el('type').onchange = load;
+
+	el('step').onclick = () => {
+		advance(5, heading);
+		post();
+	};
+	el('walk').onclick = () => (mode === 'walk' ? stop() : run('walk'));
+	el('turn').onclick = () => (mode === 'turn' ? stop() : run('turn'));
+	el('orbit').onclick = () => (mode === 'orbit' ? stop() : run('orbit'));
+	el('stop').onclick = stop;
+
+	el('headingSlider').oninput = (e) => {
+		heading = Number(e.target.value);
+		post();
+	};
+
+	// What the host sends after an intervention re-models the grid (planting a
+	// tree, say). The app never polls for new readings, so this is the only thing
+	// that invalidates a cached grid — expect exactly one new request per press.
+	el('refresh').onclick = () => {
+		if (!ready) return show('iframe not loaded yet — press Load');
+		frame.contentWindow.postMessage({ source: 'cf-temperature-map', refreshGrid: true }, '*');
+		show('sent refreshGrid');
+	};
+
+	load();
 </script>
+
+<style>
+	body { margin: 0; font: 13px system-ui, sans-serif; }
+	.panel { padding: 8px 10px; border-bottom: 1px solid #ddd; }
+	.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+	.sep { width: 1px; height: 18px; background: #ddd; }
+	label { display: inline-flex; gap: 4px; align-items: center; color: #444; }
+	button { padding: 3px 9px; }
+	output { font-variant-numeric: tabular-nums; color: #666; }
+	.hint { margin: 4px 0 0; color: #777; max-width: 70ch; line-height: 1.45; }
+	code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; }
+	iframe { display: block; width: 100%; height: calc(100vh - 150px); border: 0; }
+</style>
 </body>
 </html>

@@ -24,8 +24,15 @@
 //   - `heading` present        -> bearing comes from the host
 // Either can be used without the other, and a posted field whose param was
 // absent at load is ignored. The sender's origin is intentionally not validated.
+//
+// One message field isn't pose and isn't gated by any param: `refreshGrid`.
+// The PET data models a fixed moment rather than a live feed, so the app never
+// polls for new readings — but a host that changes the world it is modelling
+// (planting a tree, say) knows exactly when the cached grids went stale, and
+// says so. See gridSource.js.
 
 import { writable } from 'svelte/store';
+import { bumpGridEpoch } from './gridSource.js';
 
 // Tag on postMessage payloads so unrelated `message` events (devtools,
 // extensions, other embedders) are ignored.
@@ -75,6 +82,10 @@ function handleMessage(/** @type {MessageEvent} */ event) {
 		lastId = data.id;
 	}
 
+	// Not pose: the host telling us the modelled world changed. Handled
+	// whatever the pose params say — a stale grid is stale either way.
+	if (data.refreshGrid) bumpGridEpoch();
+
 	// Heading first, and never deferred: it's a single number going into a
 	// store, and any delay here is delay the visitor sees when they turn.
 	if (hasHeadingParam && typeof data.heading === 'number') {
@@ -91,6 +102,10 @@ function handleMessage(/** @type {MessageEvent} */ event) {
 	}
 }
 
-if (typeof window !== 'undefined' && (isEmbedded || hasHeadingParam)) {
+// Registered whenever there's a window to register on, not only in embedded
+// mode: `refreshGrid` is worth hearing even from a host that leaves position
+// and bearing to the device. The handler ignores everything untagged, and the
+// pose fields stay gated by the flags above.
+if (typeof window !== 'undefined') {
 	window.addEventListener('message', handleMessage);
 }

@@ -25,3 +25,8 @@ vite.config.ts.timestamp-*
 # Site data
 .gitignore
 
+# Local validation tooling — kept on disk, out of the repo.
+# scripts/check-grid-orientation.js scores the live service against the raw
+# survey CSVs; neither is needed to build or run the app.
+/scripts/check-grid-orientation.js
+/rawdata/

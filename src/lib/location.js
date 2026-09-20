@@ -32,10 +32,11 @@ const GEO_OPTIONS = {
 	timeout: 15000
 };
 
-// // TH-Vorplatz survey site's real centre (see static/geojson/TH_Vorplatz_bbox_300m.geojson) —
-// // falling back here lands inside a known site, so the fallback still gets real heatmap data.
-//const FALLBACK_LOCATION = { lng: 8.483312, lat: 49.469456 };
-//Dalbergplatz survey site's real centre (see static/geojson/Dalbergplatz_bbox_300m.geojson) —
+// Centre of the Dalbergplatz survey area. The heatmap no longer needs the
+// visitor to be inside a surveyed site — the API has readings anywhere — but
+// landing somewhere the data is known to be good still makes a blind fallback
+// show something real rather than an empty map. TH-Vorplatz, the previous
+// choice, was { lng: 8.483312, lat: 49.469456 }.
 const FALLBACK_LOCATION = { lng: 8.466304325, lat: 49.486004875 };
 const FALLBACK_DELAY_MS = 8000;
 
