@@ -8,6 +8,7 @@
 	import { heading, needsCompassPrompt, requestHeadingPermission } from '$lib/heading.js';
 	import { GRID_MODE } from '$lib/gridConfig.js';
 	import { apiSource, gridAttempt, gridEpoch } from '$lib/gridSource.js';
+	import { embedInterventions, embedSessionId } from '$lib/embedPose.js';
 
 	let map = $state(null);
 
@@ -17,7 +18,7 @@
 	// a fetch is actually warranted, and Heatmap gates on the key.
 	let source = $derived.by(() => {
 		if (!$location || GRID_MODE === 'off') return null;
-		return apiSource([$location.lng, $location.lat], $gridEpoch, $gridAttempt);
+		return apiSource([$location.lng, $location.lat], $gridEpoch, $gridAttempt, $embedInterventions, $embedSessionId);
 	});
 
 	// The camera frames a SIZE-metre crop around the visitor, set once on the

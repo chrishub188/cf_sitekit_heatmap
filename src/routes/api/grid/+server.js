@@ -15,8 +15,27 @@
 // any adapter. The upstream base URL comes from the environment and never
 // from the request — a proxy that forwards to a client-supplied host is an
 // open SSRF relay.
+//
+// An optional `interventions` param (JSON, see $lib/intervention.js) rides
+// along with the usual centerCoordinate/radiusInMeters/gridType request when
+// present — same upstream endpoint, one more query param. This is the actual
+// trust boundary the parsed JSON crosses, so every element is rebuilt from
+// only its known, checked fields (parseInterventions below) rather than
+// forwarded verbatim.
+//
+// An optional `sessionId` param is different: it's mutually exclusive with
+// `centerCoordinate`/`radiusInMeters`, not an addition to them. The service
+// dispatches `calculateEnvGrid` by matching the exact set of parameter names
+// to one of three overloaded methods — confirmed against the live service,
+// not just the docs — and `centerCoordinate` alongside `sessionId` matches
+// none of them ("No method found with name 'calculateEnvGrid' and
+// parameters [...]"), rather than the extra param simply being ignored. So
+// `sessionId` present means a *different*, coordinate-free request:
+// `sessionId` (+ `gridType`, + optional `interventions`) and nothing else —
+// see callUpstreamBySession below.
 
 import { env } from '$env/dynamic/private';
+import { parseIntervention, MAX_INTERVENTIONS } from '$lib/intervention.js';
 
 const GRID_TYPES = new Set([
 	'PET',
@@ -31,6 +50,7 @@ const GRID_TYPES = new Set([
 const MIN_RADIUS_M = 10;
 const MAX_RADIUS_M = 500;
 const UPSTREAM_TIMEOUT_MS = 8000;
+const MAX_SESSION_ID_LEN = 256;
 
 // The API docs give `centerCoordinate=GpsCoordinate` without saying how a
 // GpsCoordinate is spelled in a query string. Rather than hard-code a guess and
@@ -74,15 +94,42 @@ const summarise = (/** @type {string} */ text) => {
 const isGrid = (/** @type {any} */ body) => Array.isArray(body?.gridData) && Array.isArray(body.gridData[0]);
 
 /**
+ * Parses and validates the `interventions` query param. Never trusts the
+ * parsed JSON as-is — this is the actual trust boundary an HTTP request
+ * crosses, so every element is rebuilt from only its known, checked fields
+ * rather than forwarded verbatim.
+ * @param {string} raw
+ * @returns {import('$lib/intervention.js').Intervention[]}
+ */
+function parseInterventions(raw) {
+	/** @type {unknown} */
+	let parsed;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		throw new Error('not valid JSON');
+	}
+	if (!Array.isArray(parsed)) throw new Error('expected an array');
+	if (parsed.length > MAX_INTERVENTIONS) throw new Error(`at most ${MAX_INTERVENTIONS} interventions`);
+
+	return parsed.map((item, i) => {
+		const clean = parseIntervention(item);
+		if (!clean) throw new Error(`invalid intervention at index ${i}`);
+		return clean;
+	});
+}
+
+/**
  * @param {string} base
  * @param {string | null} encoding
  * @param {number} lat
  * @param {number} lng
  * @param {number} radius
  * @param {string} type
+ * @param {import('$lib/intervention.js').Intervention[]} interventions
  * @param {AbortSignal} signal
  */
-async function callUpstream(base, encoding, lat, lng, radius, type, signal) {
+async function callUpstream(base, encoding, lat, lng, radius, type, interventions, signal) {
 	// Whatever was asked for or worked last time first, then the rest as fallbacks.
 	const first = encoding ?? preferred;
 	const order = [...new Set(first ? [first, ...Object.keys(ENCODINGS)] : Object.keys(ENCODINGS))];
@@ -91,6 +138,7 @@ async function callUpstream(base, encoding, lat, lng, radius, type, signal) {
 	const tried = [];
 	for (const name of order) {
 		const url = upstreamUrl(base, name, lat, lng, radius, type);
+		if (interventions.length) url.searchParams.set('interventions', JSON.stringify(interventions));
 		const res = await fetch(url, { headers: { accept: 'application/json' }, signal });
 
 		// Read as text first. The service answers at least some bad requests with
@@ -120,10 +168,50 @@ async function callUpstream(base, encoding, lat, lng, radius, type, signal) {
 	throw new Error(`no coordinate encoding was accepted:\n  ${tried.join('\n  ')}`);
 }
 
+/**
+ * Session-mode call: `sessionId` (+ `gridType`, + optional `interventions`)
+ * and nothing else. No `ENCODINGS` trial loop here — there's no coordinate
+ * to spell, since sending one alongside `sessionId` fails dispatch upstream
+ * (see the header comment above).
+ * @param {string} base
+ * @param {string} sessionId
+ * @param {string} type
+ * @param {import('$lib/intervention.js').Intervention[]} interventions
+ * @param {AbortSignal} signal
+ */
+async function callUpstreamBySession(base, sessionId, type, interventions, signal) {
+	const url = new URL('calculateEnvGrid', base.endsWith('/') ? base : `${base}/`);
+	url.searchParams.set('sessionId', sessionId);
+	url.searchParams.set('gridType', type);
+	if (interventions.length) url.searchParams.set('interventions', JSON.stringify(interventions));
+
+	const res = await fetch(url, { headers: { accept: 'application/json' }, signal });
+	const text = await res.text();
+	let body = null;
+	try {
+		body = JSON.parse(text);
+	} catch {
+		body = null;
+	}
+	if (res.ok && isGrid(body)) return body;
+	throw new Error(`HTTP ${res.status} ${summarise(text)}`);
+}
+
 const fail = (/** @type {number} */ status, /** @type {string} */ message) =>
 	new Response(JSON.stringify({ error: message }), {
 		status,
 		headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }
+	});
+
+const respond = (/** @type {unknown} */ body) =>
+	new Response(JSON.stringify(body), {
+		headers: {
+			'content-type': 'application/json',
+			// The grid models a fixed moment, so a hit stays correct for a long
+			// time. `e` on the request URL is what busts this when the host says
+			// the world changed.
+			'cache-control': 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800'
+		}
 	});
 
 /** @type {import('./$types').RequestHandler} */
@@ -134,10 +222,48 @@ export async function GET({ url }) {
 		return fail(503, 'grid service is not configured');
 	}
 
+	const type = url.searchParams.get('type') ?? 'PET';
+	if (!GRID_TYPES.has(type)) return fail(400, 'unknown gridType');
+
+	const sessionIdRaw = url.searchParams.get('sessionId');
+	if (sessionIdRaw !== null && (sessionIdRaw.length === 0 || sessionIdRaw.length > MAX_SESSION_ID_LEN)) {
+		return fail(400, `sessionId must be 1–${MAX_SESSION_ID_LEN} characters`);
+	}
+	const sessionId = sessionIdRaw || null;
+
+	const interventionsRaw = url.searchParams.get('interventions');
+	/** @type {import('$lib/intervention.js').Intervention[]} */
+	let interventions = [];
+	if (interventionsRaw) {
+		try {
+			interventions = parseInterventions(interventionsRaw);
+		} catch (err) {
+			return fail(400, `invalid interventions: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+
+	// Session mode: no coordinate anywhere in this branch — see the header
+	// comment and callUpstreamBySession for why one can't ride along.
+	if (sessionId) {
+		try {
+			const body = await callUpstreamBySession(
+				base,
+				sessionId,
+				type,
+				interventions,
+				AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
+			);
+			return respond(body);
+		} catch (err) {
+			const detail = err instanceof Error ? err.message : String(err);
+			console.error(`api/grid: upstream failed — ${detail}`);
+			return fail(502, `grid service unavailable: ${detail}`);
+		}
+	}
+
 	const lat = Number(url.searchParams.get('lat'));
 	const lng = Number(url.searchParams.get('lng'));
 	const radius = Number(url.searchParams.get('r'));
-	const type = url.searchParams.get('type') ?? 'PET';
 	const encoding = url.searchParams.get('enc'); // manual override, for probing by hand
 
 	if (!Number.isFinite(lat) || lat < -90 || lat > 90) return fail(400, 'lat out of range');
@@ -145,7 +271,6 @@ export async function GET({ url }) {
 	if (!Number.isFinite(radius) || radius < MIN_RADIUS_M || radius > MAX_RADIUS_M) {
 		return fail(400, `r must be ${MIN_RADIUS_M}–${MAX_RADIUS_M} metres`);
 	}
-	if (!GRID_TYPES.has(type)) return fail(400, 'unknown gridType');
 	if (encoding && !(encoding in ENCODINGS)) return fail(400, 'unknown enc');
 
 	try {
@@ -156,17 +281,10 @@ export async function GET({ url }) {
 			lng,
 			Math.round(radius),
 			type,
+			interventions,
 			AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
 		);
-		return new Response(JSON.stringify(body), {
-			headers: {
-				'content-type': 'application/json',
-				// The grid models a fixed moment, so a hit stays correct for a long
-				// time. `e` on the request URL is what busts this when the host says
-				// the world changed.
-				'cache-control': 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800'
-			}
-		});
+		return respond(body);
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		console.error(`api/grid: upstream failed — ${detail}`);

@@ -45,10 +45,30 @@
 		<output id="status"></output>
 	</div>
 
+	<div class="row">
+		<label>interventionType <input id="ivType" size="14" value="TREE_SMALL"></label>
+		<button id="plant">🌳 Plant here</button>
+		<button id="clearIv">Clear interventions</button>
+		<output id="ivStatus"></output>
+	</div>
+
+	<div class="row">
+		<label>sessionId <input id="sessionId" size="20" placeholder="(none)"></label>
+		<button id="applySession">Apply</button>
+		<output id="sessionStatus"></output>
+	</div>
+
 	<p class="hint">
-		Watch the Network panel for <code>/api/grid</code>. Expect one request on load and
-		then roughly one per 40 m walked — never one per pose, and none at all while turning
-		in place. Only PET has a tuned colour ramp; the other grid types will look wrong.
+		Watch the Network panel for <code>/api/grid</code>. With no sessionId set, expect
+		one request on load and then roughly one per 40 m walked — never one per pose, and
+		none at all while turning in place. Only PET has a tuned colour ramp; the other grid
+		types will look wrong. Planting or clearing an intervention, or applying a sessionId,
+		should each trigger exactly one new request right away, independent of the walking
+		pacing. <strong>Once a sessionId is applied, walking should stop triggering new
+		requests entirely</strong> &mdash; the request has no coordinate in it any more, so
+		there's nothing for movement to affect; only a changed sessionId or interventions
+		list should fetch again. Clear the sessionId field and re-apply an empty value to
+		switch back to normal walking-based requests.
 	</p>
 </div>
 
@@ -81,6 +101,7 @@
 	let lat = 0, lng = 0, heading = 45;
 	let start = null, walked = 0, id = 0, posted = 0;
 	let mode = 'idle', timer = null, ready = false, tick = 0;
+	let interventions = [], ivCounter = 0;
 
 	const mPerDegLng = () => M_PER_DEG * Math.cos((lat * Math.PI) / 180);
 	const metresFromStart = () =>
@@ -93,14 +114,67 @@
 			`${posted} posts${note ? '  — ' + note : ''}`;
 	}
 
+	// Read live, not tracked in a variable — sessionId isn't something this
+	// harness simulates walking through, just a value the tester types and
+	// applies, same as how an external host would set it once.
+	const currentSessionId = () => el('sessionId').value;
+
 	function post(extra) {
 		if (!ready) return show('iframe not loaded yet — press Load');
+		const sessionId = currentSessionId();
 		frame.contentWindow.postMessage(
-			{ source: 'cf-temperature-map', lat, lng, heading, t: performance.now(), id: id++, ...extra },
+			{
+				source: 'cf-temperature-map',
+				lat,
+				lng,
+				heading,
+				t: performance.now(),
+				id: id++,
+				...(sessionId ? { sessionId } : {}),
+				...extra
+			},
 			'*'
 		);
 		posted++;
 		show();
+	}
+
+	function showIv(note) {
+		el('ivStatus').textContent =
+			`${interventions.length} intervention(s)` + (note ? '  — ' + note : '');
+	}
+
+	function showSession(note) {
+		const sid = currentSessionId();
+		el('sessionStatus').textContent = (sid ? `sessionId: ${sid}` : '(none)') + (note ? '  — ' + note : '');
+	}
+
+	// Live update, same channel as pose — only honoured because `interventions`
+	// (even as `[]`) is always on the initial URL below, which is what opens the
+	// gate in embedPose.js. Each call is its own request: unlike Walk/Turn/Orbit
+	// this doesn't wait for any pacing, so watch the Network panel for exactly
+	// one new /api/grid hit per click.
+	function postInterventions(note) {
+		if (!ready) return showIv('iframe not loaded yet — press Load');
+		const sessionId = currentSessionId();
+		frame.contentWindow.postMessage(
+			{ source: 'cf-temperature-map', interventions, ...(sessionId ? { sessionId } : {}) },
+			'*'
+		);
+		showIv(note);
+	}
+
+	// Unlike interventions, setting a sessionId swaps the app onto a different
+	// request shape entirely (no centerCoordinate — the service rejects one
+	// alongside a sessionId), so once applied here, walking should stop
+	// re-fetching the grid. embedPose.js only honours this live because
+	// `?sessionId=` (even empty) is always on the initial URL below, opening
+	// the gate the same way `interventions` does.
+	function postSession(note) {
+		if (!ready) return showSession('iframe not loaded yet — press Load');
+		const sessionId = currentSessionId();
+		frame.contentWindow.postMessage({ source: 'cf-temperature-map', sessionId }, '*');
+		showSession(note);
 	}
 
 	function load() {
@@ -112,6 +186,8 @@
 		walked = 0;
 		posted = 0;
 		ready = false;
+		interventions = [];
+		ivCounter = 0;
 		stop();
 
 		const url = new URL(el('origin').value);
@@ -121,8 +197,15 @@
 		url.searchParams.set('grid', el('grid').value);
 		url.searchParams.set('gridradius', el('radius').value);
 		url.searchParams.set('gridtype', el('type').value);
+		// Always present, even empty: embedPose.js only honours live
+		// `interventions`/`sessionId` postMessage updates if the param was on
+		// the initial URL — see Interventions/sessionId in README.md.
+		url.searchParams.set('interventions', JSON.stringify(interventions));
+		url.searchParams.set('sessionId', el('sessionId').value);
 		frame.src = url.toString();
 		show('loading…');
+		showIv();
+		showSession();
 	}
 
 	frame.onload = () => {
@@ -194,14 +277,35 @@
 		post();
 	};
 
-	// What the host sends after an intervention re-models the grid (planting a
-	// tree, say). The app never polls for new readings, so this is the only thing
-	// that invalidates a cached grid — expect exactly one new request per press.
+	// What the host sends when it wants every cache invalidated wholesale —
+	// e.g. the API started using a different underlying dataset. Not what
+	// plants a tree any more; that's the interventions list below, which
+	// invalidates itself just by being a different list.
 	el('refresh').onclick = () => {
 		if (!ready) return show('iframe not loaded yet — press Load');
 		frame.contentWindow.postMessage({ source: 'cf-temperature-map', refreshGrid: true }, '*');
 		show('sent refreshGrid');
 	};
+
+	// Plants one intervention at the current simulated position and posts the
+	// updated list live — the same shape the EnvGrid API itself expects. See
+	// src/lib/intervention.js.
+	el('plant').onclick = () => {
+		interventions.push({
+			objectId: `test-${++ivCounter}`,
+			interventionType: el('ivType').value || 'TREE_SMALL',
+			gpsCoordinate: { latitude: lat, longitude: lng },
+			isNew: true
+		});
+		postInterventions(`planted ${el('ivType').value || 'TREE_SMALL'} at ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+	};
+
+	el('clearIv').onclick = () => {
+		interventions = [];
+		postInterventions('cleared');
+	};
+
+	el('applySession').onclick = () => postSession('applied');
 
 	load();
 </script>

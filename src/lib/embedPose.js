@@ -30,9 +30,24 @@
 // polls for new readings — but a host that changes the world it is modelling
 // (planting a tree, say) knows exactly when the cached grids went stale, and
 // says so. See gridSource.js.
+//
+// `interventions` is gated the same way lat/lng/heading are: honoured live
+// only if `?interventions=` was present at load. It carries the list of
+// EnvGrid interventions (trees, etc.) to apply to the grid calculation — see
+// intervention.js for the shape and gridSource.js for how it reaches the API.
+// Unlike refreshGrid this doesn't need its own cache-bust: a changed
+// interventions list is itself a new request key.
+//
+// `sessionId` is gated and carried the same way, independently of
+// `interventions` — either can arrive without the other. It's an opaque
+// handle from the EnvGrid service; unlike `interventions`, setting it swaps
+// gridSource.js's request onto a different, coordinate-free shape entirely
+// (the service rejects a coordinate sent alongside a session id) — see
+// gridSource.js for why.
 
 import { writable } from 'svelte/store';
 import { bumpGridEpoch } from './gridSource.js';
+import { parseIntervention } from './intervention.js';
 
 // Tag on postMessage payloads so unrelated `message` events (devtools,
 // extensions, other embedders) are ignored.
@@ -55,18 +70,60 @@ function readInitialHeading() {
 	return Number.isFinite(value) ? normalizeHeading(value) : null;
 }
 
+// '' (present but empty) means "no interventions yet, but keep the live
+// channel open" — the same reading as absent, just without the warning below
+// reserved for genuinely malformed JSON.
+function readInitialInterventions() {
+	const raw = params.get('interventions');
+	if (!raw) return [];
+	let parsed;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		console.warn(`embedPose: ignoring ?interventions=${raw} — not valid JSON`);
+		return [];
+	}
+	if (!Array.isArray(parsed)) {
+		console.warn(`embedPose: ignoring ?interventions=${raw} — expected a JSON array`);
+		return [];
+	}
+	const clean = parsed.map(parseIntervention);
+	if (clean.some((v) => v === null)) {
+		console.warn(`embedPose: ignoring ?interventions=${raw} — contains an invalid intervention`);
+		return [];
+	}
+	return /** @type {import('./intervention.js').Intervention[]} */ (clean);
+}
+
+// '' (present but empty) means "no session yet, but keep the live channel
+// open" — same reading as absent.
+function readInitialSessionId() {
+	const raw = params.get('sessionId');
+	return raw ? raw : null;
+}
+
 /** True when the host drives position: both `lat` and `lng` were on the URL. */
 export const isEmbedded = params.get('lat') !== null && params.get('lng') !== null;
 /** True when the host drives bearing: `heading` was on the URL. */
 export const hasHeadingParam = params.get('heading') !== null;
+/** True when the host drives interventions: `interventions` was on the URL. */
+export const hasInterventionsParam = params.get('interventions') !== null;
+/** True when the host drives the session id: `sessionId` was on the URL. */
+export const hasSessionParam = params.get('sessionId') !== null;
 
 export const initialLocation = isEmbedded ? readInitialLocation() : null;
 export const initialHeading = hasHeadingParam ? readInitialHeading() : null;
+export const initialInterventions = hasInterventionsParam ? readInitialInterventions() : [];
+export const initialSessionId = hasSessionParam ? readInitialSessionId() : null;
 
 /** Latest host-supplied position, or null while none has arrived. */
 export const embedLocation = writable(initialLocation);
 /** Latest host-supplied bearing in degrees clockwise from true north, or null. */
 export const embedHeading = writable(initialHeading);
+/** Latest host-supplied interventions list — see intervention.js for the shape. */
+export const embedInterventions = writable(initialInterventions);
+/** Latest host-supplied EnvGrid session id, or null. */
+export const embedSessionId = writable(initialSessionId);
 
 // Messages can arrive out of order; `id`, when the host sends one, is a
 // monotonic counter, so anything older than what we've already applied is a
@@ -90,6 +147,22 @@ function handleMessage(/** @type {MessageEvent} */ event) {
 	// store, and any delay here is delay the visitor sees when they turn.
 	if (hasHeadingParam && typeof data.heading === 'number') {
 		embedHeading.set(normalizeHeading(data.heading));
+	}
+
+	// Interventions: applied whole or not at all — a partially-valid array
+	// silently dropping bad elements would apply a set the host never sent.
+	// No console.warn here, unlike the one-time URL parse above: a live
+	// channel misfiring occasionally is routine, not exceptional, the way a
+	// malformed URL param is.
+	if (hasInterventionsParam && Array.isArray(data.interventions)) {
+		const clean = data.interventions.map(parseIntervention);
+		if (clean.every((/** @type {import('./intervention.js').Intervention | null} */ v) => v !== null)) {
+			embedInterventions.set(/** @type {import('./intervention.js').Intervention[]} */ (clean));
+		}
+	}
+
+	if (hasSessionParam && typeof data.sessionId === 'string') {
+		embedSessionId.set(data.sessionId);
 	}
 
 	// Position is the head of a chain of expensive work (camera, marker,

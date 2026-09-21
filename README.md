@@ -30,12 +30,25 @@ no overlay is drawn and the location marker is shown on its own.
 
 ## Grid data
 
-Readings come from the EnvGrid service:
+Readings come from the EnvGrid service, in one of two mutually exclusive
+shapes:
 
 ```
-GET {ENV_GRID_BASE}/calculateEnvGrid?centerCoordinate=…&radiusInMeters=…&gridType=PET
+GET {ENV_GRID_BASE}/calculateEnvGrid?centerCoordinate=…&radiusInMeters=…&gridType=PET&interventions=…
+GET {ENV_GRID_BASE}/calculateEnvGrid?sessionId=…&gridType=PET&interventions=…
 -> { sessionId, centerCoordinate, radiusInMeters, gridType, gridData: (number|null)[][] }
 ```
+
+`interventions` is always optional, on either shape. Which shape is used
+depends only on whether a `sessionId` is present — **the service dispatches
+`calculateEnvGrid` by matching the exact set of parameter names to one of
+three overloaded methods, so `centerCoordinate` alongside `sessionId`
+doesn't get ignored, it fails outright** ("No method found with name
+`calculateEnvGrid` and parameters [...]", confirmed against the live
+service). So whenever `sessionId` is set, `centerCoordinate`/
+`radiusInMeters` are dropped from the request entirely, not merely left
+unused — see
+[Interventions and sessions](#interventions-and-sessions) below.
 
 `gridData` is a dense 2-D array of readings with no coordinates at all.
 [src/lib/envGrid.js](src/lib/envGrid.js) reconstructs them from the response's
@@ -140,15 +153,89 @@ which runs over every cell in the grid each time the visitor moves 2 m.
 ### Staleness
 
 The data models a fixed moment (14:00), not a timeseries, so **nothing polls**.
-A grid is fetched once per area and cached hard. When the host changes the
-world it is modelling — planting a tree that re-models the surroundings — it
-says so, and every cache is invalidated:
+A grid is fetched once per area and cached hard. When the host changes
+something about the *model itself* that this app has no request param for —
+the API starts using a different underlying dataset, say — it says so, and
+every cache is invalidated:
 
 ```js
 iframeEl.contentWindow.postMessage({ source: 'cf-temperature-map', refreshGrid: true }, '*');
 ```
 
-`?gridepoch=<n>` does the same at load time.
+`?gridepoch=<n>` does the same at load time. Planting a tree doesn't need
+this: it's an EnvGrid intervention, sent via `interventions` below, and a
+changed interventions list is already a new request in its own right.
+
+### Interventions and sessions
+
+Two optional, independent parameters let a host adapt the grid to
+interventions (trees, etc.) rather than just requesting the bare terrain —
+e.g. an AR host letting someone place a tree and see its effect on the
+heatmap. Both follow the same pattern as `heading`: an initial URL query
+param, plus live updates over the same `postMessage` channel, only honoured
+live if the param was present at load.
+
+**`interventions`** — the list of interventions to apply:
+
+- **Initial value** comes from `?interventions=<URL-encoded JSON array>` on
+  the iframe's URL, a JSON array of
+  `{interventionType, gpsCoordinate: {latitude, longitude}, isNew, objectId?, orientationDegree?}`
+  objects — the same shape the EnvGrid API itself expects. For example, to
+  request the grid with two small trees applied:
+  ```
+  ?interventions=[{"interventionType":"TREE_SMALL","gpsCoordinate":{"latitude":49.469456,"longitude":8.483312},"isNew":true},{"interventionType":"TREE_SMALL","gpsCoordinate":{"latitude":49.4701,"longitude":8.4827},"isNew":true}]
+  ```
+- **Live updates**:
+  ```js
+  iframeEl.contentWindow.postMessage(
+  	{ source: 'cf-temperature-map', interventions },
+  	'*'
+  );
+  ```
+  Only honoured if `?interventions=` (even `?interventions=[]`) was present
+  at load. An update is applied whole or not at all: if any element fails
+  validation, the whole message is dropped rather than applying a partial
+  list the host didn't actually send.
+
+**`sessionId`** — an opaque EnvGrid session id, for a host that manages its
+own sessions with the service directly (e.g. an AR app that already called
+EnvGrid itself). Passing it lets the service resolve interventions it
+already knows about for that session, without resending the list through
+this app:
+
+- **Initial value** comes from `?sessionId=<string>`.
+- **Live updates**:
+  ```js
+  iframeEl.contentWindow.postMessage(
+  	{ source: 'cf-temperature-map', sessionId },
+  	'*'
+  );
+  ```
+  Only honoured if `?sessionId=` (even empty) was present at load.
+
+`interventions` and `sessionId` can be sent together — a host with its own
+session can still push one more intervention through immediately, ahead of
+updating the session server-side — or `interventions` alone, with no
+session, for a host that doesn't manage sessions.
+
+**Setting `sessionId` changes what kind of request is made, not just what's
+in it.** As covered in [Grid data](#grid-data), the service doesn't accept
+`centerCoordinate`/`radiusInMeters` together with `sessionId` — sending both
+fails outright rather than one being ignored — so whenever `sessionId` is
+set, the request drops the coordinate entirely and asks for that session's
+grid as-is. Concretely: **while a `sessionId` is active, walking around does
+not refetch or re-centre the grid** — there's no coordinate in the request
+for the visitor's movement to affect, so the marker and heatmap keep
+following the visitor's live position (see
+[When there is no data](#when-there-is-no-data) for what happens once they
+walk outside a session's fixed extent), but the fetched *data* itself stays
+put until `interventions` or `sessionId` next changes. Without a `sessionId`,
+`interventions` behaves exactly as before: it rides along the normal
+anchor-paced, position-following request (see
+[Keeping requests rare](#keeping-requests-rare)).
+
+See [Example iframe embeds](#example-iframe-embeds) for ready-to-copy URLs
+combining these with `lat`/`lng`/`heading`, and a full `postMessage` example.
 
 ### Query parameters
 
@@ -159,6 +246,8 @@ iframeEl.contentWindow.postMessage({ source: 'cf-temperature-map', refreshGrid: 
 | `gridradius` | `100` | fetch radius in metres, 60–300 |
 | `gridepoch` | `0` | bump to bypass every cache |
 | `gridorder` / `gridnorth` | `xy` / `top` | orientation override, see above |
+| `interventions` | *(none)* | JSON array of EnvGrid interventions, see [Interventions and sessions](#interventions-and-sessions) |
+| `sessionId` | *(none)* | EnvGrid session id, see [Interventions and sessions](#interventions-and-sessions) |
 
 ### When there is no data
 
@@ -237,26 +326,96 @@ side of both lives in [src/lib/embedPose.js](src/lib/embedPose.js): one
     `?lat=<latitude>&lng=<longitude>&heading=<degrees>`. `lat`/`lng` and
     `heading` are checked independently, so e.g. `?heading=90` alone still
     lets location fall back to the device while heading is externally driven.
-    For example, to open directly on the TH-Vorplatz site facing east:
-    ```
-    https://your-deployed-map.example.com/?lat=49.469456&lng=8.483312&heading=90
-    ```
+    See [Example iframe embeds](#example-iframe-embeds) below for
+    ready-to-copy URLs, including combined with `interventions`/`sessionId`.
   - **Live updates** arrive via `postMessage` from the parent frame, so the
     iframe never has to navigate/reload to reflect a new position:
     ```js
     iframeEl.contentWindow.postMessage(
-    	{ source: 'cf-temperature-map', lat, lng, heading },
+    	{ source: 'cf-temperature-map', lat, lng, heading, interventions, sessionId },
     	'*'
     );
     ```
-    `lat`/`lng` and `heading` can be sent together or separately (e.g.
-    heading updates far more often than position). A `refreshGrid: true`
-    field invalidates the cached grids — see [Staleness](#staleness). Messages are tagged with
+    `lat`/`lng`, `heading`, `interventions`, and `sessionId` can be sent
+    together or separately (e.g. heading updates far more often than
+    position). Each is only honoured if its corresponding query param was
+    present at load — see
+    [Interventions and sessions](#interventions-and-sessions) for those two
+    fields' shapes. A `refreshGrid: true` field invalidates the cached grids
+    — see [Staleness](#staleness). Messages are tagged with
     `source: 'cf-temperature-map'` so unrelated `message` events are
     ignored; the sender's origin is intentionally not validated. An optional
     numeric `id` field, if the host sends one, is treated as a monotonic
     counter and used to drop out-of-order messages. If updates stop arriving,
     the marker/heatmap simply freeze at the last known value.
+
+### Example iframe embeds
+
+Complete, ready-to-copy examples for an external developer wiring this app
+into a host page or WebView. See
+[Interventions and sessions](#interventions-and-sessions) for what
+`interventions`/`sessionId` do and how the two interact.
+
+**Just position and heading**, device supplies everything else:
+```
+https://your-deployed-map.example.com/?lat=49.469456&lng=8.483312&heading=90
+```
+
+**With an intervention applied**, no session — the app requests a fresh,
+intervention-adjusted grid, re-centred as the visitor walks:
+```
+https://your-deployed-map.example.com/?lat=49.469456&lng=8.483312&heading=90&interventions=[{"interventionType":"TREE_SMALL","gpsCoordinate":{"latitude":49.469456,"longitude":8.483312},"isNew":true}]
+```
+
+**Driven by a session the host manages itself** — the service already knows
+that session's interventions, so none need to be resent, and the grid stays
+fixed to the session's original extent regardless of how far the visitor
+walks:
+```
+https://your-deployed-map.example.com/?lat=49.469456&lng=8.483312&heading=90&sessionId=abc123
+```
+
+**Session plus one more intervention pushed through immediately**, ahead of
+the host updating the session server-side:
+```
+https://your-deployed-map.example.com/?lat=49.469456&lng=8.483312&heading=90&sessionId=abc123&interventions=[{"interventionType":"TREE_SMALL","gpsCoordinate":{"latitude":49.469456,"longitude":8.483312},"isNew":true}]
+```
+
+**A full embed**, initial URL plus live updates over `postMessage` as the
+visitor moves and the host learns of new interventions or a session id:
+```html
+<iframe
+  id="tempMap"
+  src="https://your-deployed-map.example.com/?lat=49.469456&lng=8.483312&heading=90&sessionId=&interventions=[]"
+  style="border: 0; width: 100%; height: 100%"
+></iframe>
+<script>
+  const frame = document.getElementById('tempMap').contentWindow;
+  let seq = 0;
+
+  // Called on every pose update from the device/tracking system.
+  function updatePose(lat, lng, heading) {
+    frame.postMessage({ source: 'cf-temperature-map', lat, lng, heading, id: seq++ }, '*');
+  }
+
+  // Called when the visitor places a tree in AR.
+  function plantTree(latitude, longitude) {
+    frame.postMessage({
+      source: 'cf-temperature-map',
+      interventions: [{ interventionType: 'TREE_SMALL', gpsCoordinate: { latitude, longitude }, isNew: true }]
+    }, '*');
+  }
+
+  // Called once the host has an EnvGrid session id of its own to hand over.
+  function useSession(sessionId) {
+    frame.postMessage({ source: 'cf-temperature-map', sessionId }, '*');
+  }
+</script>
+```
+Note the initial URL includes `sessionId=` and `interventions=[]` even though
+both are empty — that's what opens the gate for the later `postMessage`
+calls to be honoured at all (each is only live-updatable if its query param
+was present, even empty, at load).
 
 ### Keeping up with a live feed
 
