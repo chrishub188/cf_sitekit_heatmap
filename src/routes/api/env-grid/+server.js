@@ -41,6 +41,8 @@ export async function POST({ request }) {
 	const base = (env.ENV_GRID_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
 	const target = `${base}/calculateEnvGrid?${envGridQuery(payload)}`;
 
+	console.log('env-grid: requesting', target);
+
 	let res;
 	try {
 		res = await fetch(target, { signal: AbortSignal.timeout(TIMEOUT_MS) });

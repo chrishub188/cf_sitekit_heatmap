@@ -2,11 +2,14 @@
 	import SiteMap from '$lib/components/SiteMap.svelte';
 	import SiteSwitch from '$lib/components/SiteSwitch.svelte';
 	import ResolutionSwitch from '$lib/components/ResolutionSwitch.svelte';
+	import HeatmapToggle from '$lib/components/HeatmapToggle.svelte';
 	import FilteredToggle from '$lib/components/FilteredToggle.svelte';
 	import SegmentedSwitch from '$lib/components/SegmentedSwitch.svelte';
 	import ControlPanel from '$lib/components/ControlPanel.svelte';
 	import Heatmap from '$lib/components/Heatmap.svelte';
 	import TreeOverlay from '$lib/components/TreeOverlay.svelte';
+	import PlanningOverlay from '$lib/components/PlanningOverlay.svelte';
+	import PlanningPanel from '$lib/components/PlanningPanel.svelte';
 	import LogDropZone from '$lib/components/LogDropZone.svelte';
 	import LogRow from '$lib/components/LogRow.svelte';
 	import Legend from '$lib/components/Legend.svelte';
@@ -25,6 +28,7 @@
 	import { parseLogfile, readLogFile } from '$lib/logfile.js';
 	import { clipTest } from '$lib/clip.js';
 	import { gridToRows, requestEnvGrid } from '$lib/envgrid.js';
+	import { loadLocalGrid } from '$lib/localgrid.js';
 
 	let active = $state(0);
 	let resolution = $state('1m');
@@ -52,15 +56,47 @@
 	let baseline = $state.raw(/** @type {(GridState & { site: number }) | null} */ (null));
 	// The log's site rerun with its trees in place.
 	let simulation = $state.raw(/** @type {GridState | null} */ (null));
+	// The site's own 5 m model run (see localgrid.js), loaded only while 5 m is
+	// on screen. Raw for the same reason as the baseline.
+	/** @typedef {{ site: number, status: 'loading' | 'ready' | 'error', data: import('$lib/localgrid.js').GridRows | null, message: string | null }} LocalGridState */
+	let localGrid = $state.raw(/** @type {LocalGridState | null} */ (null));
 	/** @type {string | null} */
 	let logError = $state(null);
 	let mode = $state('heatmap');
 	let phase = $state('after'); // 'before' | 'after' — which grid the heatmap draws for the log's site
 	let shownTrees = $state(0); // crowns left after the active clip shape, reported by the overlay
 	const interventions = $derived(log?.interventions ?? []);
+	// Planning layers switched on. Ids carry the site folder, so each site keeps
+	// its own selection across tab switches. Replaced, not mutated, on a toggle.
+	let planning = $state(/** @type {Set<string>} */ (new Set()));
+	// Off hides the heatmap cells, leaving the planning areas (or the bare map).
+	let showHeatmap = $state(true);
+
+	/** @param {string} id @param {boolean} on */
+	function togglePlanning(id, on) {
+		const next = new Set(planning);
+		if (on) next.add(id);
+		else next.delete(id);
+		planning = next;
+	}
 
 	const site = $derived(SITES[active]);
-	const cellSize = $derived(RESOLUTIONS.find((r) => r.id === resolution).size);
+	// 5 m only exists where a site ships its own 5 m run. Elsewhere the button is
+	// greyed out and the map falls back to 1 m, while `resolution` keeps the
+	// choice for the next site that has one.
+	const resolutionOptions = $derived(
+		RESOLUTIONS.map((r) =>
+			r.source === 'local' && !site.grid5mUrl
+				? { ...r, disabled: true, title: 'Not modelled at 5 m for this site' }
+				: r
+		)
+	);
+	const shownResolution = $derived(
+		resolutionOptions.find((r) => r.id === resolution && !r.disabled) ??
+			resolutionOptions.find((r) => !r.disabled) ??
+			resolutionOptions[0]
+	);
+	const local = $derived(shownResolution.source === 'local');
 	// The 'full' shape swaps in the wider rect for both the clip and the camera;
 	// plaza and circle keep the 100 m framing they already assume.
 	const viewBounds = $derived(clipShape === 'full' ? site.fullBounds : site.bounds);
@@ -73,17 +109,55 @@
 		baseline?.site === active && baseline.status === 'ready' ? baseline.grid : null
 	);
 	const grid = $derived(phase === 'after' && simulated ? simulated : baseGrid);
-	const cells = $derived(grid ? gridToRows(grid, cellSize) : null);
+	const localCells = $derived(
+		localGrid?.site === active && localGrid.status === 'ready' ? localGrid.data : null
+	);
+	// 5 m draws the site's own model run as it is; 1 m draws the backend grid.
+	const cells = $derived(
+		local ? localCells : grid ? gridToRows(grid, shownResolution.size) : null
+	);
+	// What the legend reports while the grid on screen isn't there yet.
+	const heatStatus = $derived(
+		local ? (localCells ? null : (localGrid?.status ?? null)) : grid ? null : (baseline?.status ?? null)
+	);
+	const heatMessage = $derived(local ? (localGrid?.message ?? null) : (baseline?.message ?? null));
 	// Before/After only means something on the log's own site, once a rerun has
 	// been requested; 'After' stays greyed out until the backend answers.
 	const comparable = $derived(mode === 'heatmap' && log?.site === active && simulation != null);
+	// Trees are only ever rerun at 1 m, so at 5 m there is no modelled 'After'
+	// to show — only the 5 m baseline.
 	const phaseOptions = $derived(
 		PHASES.map((p) =>
-			p.id === 'after' && !simulated
-				? { ...p, disabled: true, title: simulation?.message ?? 'Simulating…' }
-				: p
+			p.id !== 'after'
+				? p
+				: local
+					? { ...p, disabled: true, title: 'Tree reruns are only simulated at 1 m' }
+					: !simulated
+						? { ...p, disabled: true, title: simulation?.message ?? 'Simulating…' }
+						: p
 		)
 	);
+
+	// Loads the site's 5 m run while 5 m is on screen.
+	$effect(() => {
+		if (!local || !site.grid5mUrl) return;
+		const index = active;
+		let current = true;
+		localGrid = { site: index, status: 'loading', data: null, message: null };
+		loadLocalGrid(site.grid5mUrl)
+			.then((data) => {
+				if (current) localGrid = { site: index, status: 'ready', data, message: null };
+			})
+			.catch((err) => {
+				if (!current) return;
+				console.warn('5 m grid failed', err);
+				const message = err instanceof Error ? err.message : String(err);
+				localGrid = { site: index, status: 'error', data: null, message };
+			});
+		return () => {
+			current = false;
+		};
+	});
 
 	// Each backend call opens a new session and takes seconds, so a site's
 	// baseline is fetched once per page load and reused on every revisit. A
@@ -241,9 +315,10 @@
 			{showFiltered}
 			{scaleMin}
 			{scaleMax}
-			visible={mode === 'heatmap'}
+			visible={mode === 'heatmap' && showHeatmap}
 			ondomain={(d) => (domain = d)}
 		/>
+		<PlanningOverlay {map} {site} enabled={planning} />
 		{#if interventions.length}
 			<TreeOverlay
 				{map}
@@ -261,13 +336,20 @@
 	<AiWatermark />
 	<LogDropZone onfile={loadFile} onerror={reportError} />
 	<SiteSwitch sites={SITES} {active} onselect={(i) => (active = i)} />
-	<ResolutionSwitch resolutions={RESOLUTIONS} active={resolution} onselect={(id) => (resolution = id)} />
+	<div class="top-right">
+		<HeatmapToggle active={showHeatmap} onselect={(v) => (showHeatmap = v)} />
+		<ResolutionSwitch
+			resolutions={resolutionOptions}
+			active={shownResolution.id}
+			onselect={(id) => (resolution = id)}
+		/>
+	</div>
 	<div class="top">
 		{#if comparable}
 			<div class="chip">
 				<SegmentedSwitch
 					options={phaseOptions}
-					active={simulated ? phase : 'before'}
+					active={simulated && !local ? phase : 'before'}
 					onselect={(id) => (phase = id)}
 				/>
 			</div>
@@ -276,42 +358,45 @@
 			<RecenterButton {map} bounds={viewBounds} bearing={site.bearing} />
 		{/if}
 	</div>
-	<ControlPanel>
-		<!-- Always mounted: with no data loaded the scale row stays in place and
-		     simply shows empty value boxes, so the panel never changes height. -->
-		<Legend
-			min={scaleMin ?? domain?.min ?? null}
-			max={scaleMax ?? domain?.max ?? null}
-			pinned={scaleMin != null || scaleMax != null}
-			status={grid ? null : (baseline?.status ?? null)}
-			statusMessage={baseline?.message ?? null}
-			onmin={(v) => (scaleMin = v)}
-			onmax={(v) => (scaleMax = v)}
-			onreset={() => {
-				scaleMin = null;
-				scaleMax = null;
-			}}
-		/>
-		<div class="row">
-			<SegmentedSwitch options={CLIP_SHAPES} active={clipShape} onselect={(id) => (clipShape = id)} />
-			<div class="aside">
-				<FilteredToggle active={showFiltered} onselect={(v) => (showFiltered = v)} />
+	<div class="corner">
+		<PlanningPanel {site} enabled={planning} ontoggle={togglePlanning} />
+		<ControlPanel>
+			<!-- Always mounted: with no data loaded the scale row stays in place and
+			     simply shows empty value boxes, so the panel never changes height. -->
+			<Legend
+				min={scaleMin ?? domain?.min ?? null}
+				max={scaleMax ?? domain?.max ?? null}
+				pinned={scaleMin != null || scaleMax != null}
+				status={heatStatus}
+				statusMessage={heatMessage}
+				onmin={(v) => (scaleMin = v)}
+				onmax={(v) => (scaleMax = v)}
+				onreset={() => {
+					scaleMin = null;
+					scaleMax = null;
+				}}
+			/>
+			<div class="row">
+				<SegmentedSwitch options={CLIP_SHAPES} active={clipShape} onselect={(id) => (clipShape = id)} />
+				<div class="aside">
+					<FilteredToggle active={showFiltered} onselect={(v) => (showFiltered = v)} />
+				</div>
 			</div>
-		</div>
-		<LogRow
-			name={log?.name ?? null}
-			count={interventions.length}
-			shown={shownTrees}
-			entries={log?.entries.length ?? 0}
-			error={logError}
-			simulation={log?.site === active ? (simulation?.status ?? null) : null}
-			simulationError={simulation?.message ?? null}
-			{mode}
-			onmode={(m) => (mode = m)}
-			onfile={loadFile}
-			onclear={clearLog}
-		/>
-	</ControlPanel>
+			<LogRow
+				name={log?.name ?? null}
+				count={interventions.length}
+				shown={shownTrees}
+				entries={log?.entries.length ?? 0}
+				error={logError}
+				simulation={log?.site === active ? (simulation?.status ?? null) : null}
+				simulationError={simulation?.message ?? null}
+				{mode}
+				onmode={(m) => (mode = m)}
+				onfile={loadFile}
+				onclear={clearLog}
+			/>
+		</ControlPanel>
+	</div>
 </div>
 
 <style>
@@ -323,6 +408,27 @@
 	.row {
 		display: flex;
 		align-items: stretch;
+	}
+
+	/* Bottom-left stack: planning areas above the control panel. Both boxes
+	   stretch to the widest one so the corner reads as one column. */
+	.corner {
+		position: absolute;
+		bottom: 1rem;
+		left: 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+		width: fit-content;
+	}
+
+	/* Top right: heatmap on/off next to the resolution it's drawn at. */
+	.top-right {
+		position: absolute;
+		top: 1rem;
+		right: 1rem;
+		display: flex;
+		gap: 0.4rem;
 	}
 
 	/* Top centre, between the site tabs and the resolution switch. */

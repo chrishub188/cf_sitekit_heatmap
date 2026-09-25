@@ -15,6 +15,13 @@ export const INK = '#9A9081';
 export const PLANTING_FILL = '#9DB491';
 export const PLANTING_INK = '#6F8A57';
 
+// Planning areas. Assigned by role and file number rather than by name, so
+// any site's files get colours; all of them keep clear of the heatmap's
+// blue→red ramp and of the paper ground.
+export const PLANNING_BOUNDARY = '#5E554A'; // the 00 outline, dashed and unfilled
+export const PLANNING_RESTRICTION_COLORS = ['#7B5EA7', '#4A6A8A', '#B08A2E', '#A4487A', '#5C8C84', '#8A5A3C'];
+export const PLANNING_DESIGN = '#2F6B4F'; // the leftover design area
+
 // --- expression helpers ----------------------------------------------------
 const kind = (...kinds) => ['match', ['get', 'kind'], kinds, true, false];
 export const zoom = (...stops) => ['interpolate', ['exponential', 1.6], ['zoom'], ...stops];
@@ -178,6 +185,9 @@ export const customStyle = {
 		// below it, the tree crowns above it, so neither can end up on top of the
 		// other by winning a race. Renders nothing.
 		{ id: 'overlay-anchor', type: 'background', layout: { visibility: 'none' }, paint: { 'background-color': PAPER } },
+		// Planning areas insert below this one: above the heatmap, below the tree
+		// crowns (which insert before site-marker).
+		{ id: 'planning-anchor', type: 'background', layout: { visibility: 'none' }, paint: { 'background-color': PAPER } },
 
 		{
 			id: 'site-marker',

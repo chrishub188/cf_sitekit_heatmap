@@ -4,17 +4,20 @@
 
 <nav>
 	{#each resolutions as resolution}
-		<button class:on={resolution.id === active} onclick={() => onselect?.(resolution.id)}>
+		<button
+			class:on={resolution.id === active}
+			disabled={resolution.disabled}
+			title={resolution.title}
+			onclick={() => onselect?.(resolution.id)}
+		>
 			{resolution.label} <span class="unit">{resolution.unit}</span>
 		</button>
 	{/each}
 </nav>
 
 <style>
+	/* Placed by the page's top-right group, next to the heatmap toggle. */
 	nav {
-		position: absolute;
-		top: 1rem;
-		right: 1rem;
 		display: flex;
 		gap: 1px;
 		padding: 1px;
@@ -34,8 +37,14 @@
 		cursor: pointer;
 	}
 
-	button:hover {
+	button:hover:not(:disabled) {
 		color: #6f665a;
+	}
+
+	/* A site without data at this resolution. */
+	button:disabled {
+		color: #cdc1a9;
+		cursor: default;
 	}
 
 	button.on {

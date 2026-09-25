@@ -17,11 +17,14 @@ const bbox = ([lng, lat], size = SIZE) => {
 	return [lng - dx, lat - dy, lng + dx, lat + dy]; // [west, south, east, north]
 };
 
-// Cell sizes the heatmap can be drawn at. The backend only computes 1 m cells;
-// coarser ones are averaged from them client-side — see gridToRows.
+// Cell sizes the heatmap can be drawn at, and where each comes from. 1 m is
+// the simulation backend (and the only one a logfile's trees are rerun at);
+// 5 m is a separate model run shipped per site as a static CSV (grid5mUrl
+// below), drawn as modelled rather than averaged down from 1 m.
+/** @type {{ id: string, label: string, unit: string, size: number, source: 'local' | 'backend', disabled?: boolean, title?: string }[]} */
 export const RESOLUTIONS = [
-	{ id: '5m', label: '5', unit: 'm', size: 5 },
-	{ id: '1m', label: '1', unit: 'm', size: 1 }
+	{ id: '5m', label: '5', unit: 'm', size: 5, source: 'local' },
+	{ id: '1m', label: '1', unit: 'm', size: 1, source: 'backend' }
 ];
 
 // Four ways to clip the data to a site: the square bbox (SIZE above), the full
@@ -49,6 +52,11 @@ export const PHASES = [
 	{ id: 'after', label: 'After' }
 ];
 
+// Planning restrictions shipped per site under planning_areas/<dir>/. Every
+// site names its own files, since the layer names differ between sites; the
+// label, colour and stacking are derived from each filename (see planning.js).
+// An optional `labels: { [filename]: label }` overrides a derived label.
+
 // How the camera frames a site's bounds, on load, on a switch and on recenter.
 export const FIT = { padding: 40, maxZoom: 19.5 };
 
@@ -59,7 +67,19 @@ export const SITES = [
 		note: `Mannheim · ${FULL_SIZE} m`,
 		center: [8.466304325, 49.486004875], // dahlbergplatz_bbox_300m.geojson
 		bearing: 0, // lines the Quadrate grid up with the screen edge
-		filterUrl: '/geojson/filter_location/dalbergplatz.geojson'
+		filterUrl: '/geojson/filter_location/dalbergplatz.geojson',
+		grid5mUrl: '/data/5mx5m/dalbergplatz.csv',
+		planning: {
+			dir: 'Dalbergplatz',
+			files: [
+				'00_MA_RaeumlicheAbgrenzung.geojson',
+				'01_MA_RaeumlicheAbgrenzung_minusGebaeudePuffer.geojson',
+				'02_MA_RaeumlicheAbgrenzung_minusStrassenPuffer.geojson',
+				'03_MA_RaeumlicheAbgrenzung_minusZusatzparameter.geojson',
+				'04_MA_RaeumlicheAbgrenzung_minusAchsen.geojson',
+				'05_MA_Entwurfsflaeche.geojson'
+			]
+		}
 	},
 	{
 		id: 'am-altenhof',
@@ -67,7 +87,19 @@ export const SITES = [
 		note: `Kaiserslautern · ${FULL_SIZE} m`,
 		center: [7.76846, 49.44426], // Am_Altenhof_bbox_300m.geojson
 		bearing: 0,
-		filterUrl: '/geojson/filter_location/am_altenhof.geojson'
+		filterUrl: '/geojson/filter_location/am_altenhof.geojson',
+		grid5mUrl: null, // not modelled at 5 m; the CSV in static/data/5mx5m/ is header-only
+		planning: {
+			dir: 'Am_Altenhof',
+			files: [
+				'00_KL_RaeumlicheAbgrenzung.geojson',
+				'01_KL_RaeumlicheAbgrenzung_minusGebaeudePuffer.geojson',
+				'02_KL_RaeumlicheAbgrenzung_minusStrassenPuffer.geojson',
+				'03_KL_RaeumlicheAbgrenzung_minusZusatzparameter.geojson',
+				'04_KL_RaeumlicheAbgrenzung_minusAchsen.geojson',
+				'05_KL_Entwurfsflaeche.geojson'
+			]
+		}
 	},
 	{
 		id: 'th-vorplatz',
@@ -75,7 +107,9 @@ export const SITES = [
 		note: `Mannheim · ${FULL_SIZE} m`,
 		center: [8.483312, 49.469456], // TH_Vorplatz_bbox_300m.geojson
 		bearing: 0,
-		filterUrl: '/geojson/filter_location/th_vorplatz.geojson'
+		filterUrl: '/geojson/filter_location/th_vorplatz.geojson',
+		grid5mUrl: '/data/5mx5m/th_vorplatz.csv',
+		planning: null // no planning data for this site
 	}
 ].map((site) => ({
 	...site,

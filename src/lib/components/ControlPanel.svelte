@@ -9,12 +9,9 @@
 </div>
 
 <style>
+	/* Placed by the page's bottom-left corner stack; sized by the widest row
+	   there, while the legend bar keeps its own minimum. */
 	.panel {
-		position: absolute;
-		bottom: 1rem;
-		left: 1rem;
-		/* sized by the widest row; the legend bar keeps its own minimum */
-		width: fit-content;
 		border: 2px solid #cdc1a9;
 		background: #f1ebdf;
 	}
