@@ -1,6 +1,5 @@
 <script>
 	import { onDestroy } from 'svelte';
-	import { scaleSequential, interpolateRdYlBu } from 'd3';
 	import proj4 from 'proj4';
 	import { clipTest, loadPolygon } from '$lib/clip.js';
 	import { EPSG25832 } from '$lib/geo.js';
@@ -22,6 +21,7 @@
 		opacity = 0.35,
 		scaleMin = null, // PET pinned to the blue end; null = use the loaded data's minimum
 		scaleMax = null, // PET pinned to the red end; null = use the loaded data's maximum
+		ramp, // t -> colour, t=0 at the low PET end and t=1 at the high end (see colorSchemes.js)
 		ondomain // called with {min, max} of the loaded PET values, or null, for a legend to reflect
 	} = $props();
 
@@ -39,12 +39,11 @@
 
 	// Cells carry their raw PET and are colored by a paint expression rather than
 	// a baked-in color, so moving the scale limits is a repaint, not a reload.
-	// lo sits at the interpolator's blue end, hi at its red end; MapLibre clamps
-	// values outside [lo, hi] to the end stops.
-	function colorExpression(lo, hi) {
-		// Domain reversed ([hi, lo]) so higher PET maps to the interpolator's red end.
-		const color = scaleSequential(interpolateRdYlBu).domain([hi, lo]);
-		const ramp =
+	// lo sits at the ramp's low end, hi at its high end; MapLibre clamps values
+	// outside [lo, hi] to the end stops.
+	function colorExpression(lo, hi, colorRamp) {
+		const color = (v) => colorRamp((v - lo) / (hi - lo));
+		const stops =
 			hi > lo
 				? [
 						'interpolate',
@@ -55,8 +54,8 @@
 							return [value, color(value)];
 						}).flat()
 					]
-				: interpolateRdYlBu(0.5);
-		return ['case', ['==', ['get', 'filtered'], true], FILTERED_COLOR, ramp];
+				: colorRamp(0.5);
+		return ['case', ['==', ['get', 'filtered'], true], FILTERED_COLOR, stops];
 	}
 
 	// Unit superellipse sampled once; each cell reuses it via an affine map (below).
@@ -146,7 +145,7 @@
 					source: SOURCE_ID,
 					layout: { visibility: visible ? 'visible' : 'none' },
 					paint: {
-						'fill-color': interpolateRdYlBu(0.5), // replaced by the repaint effect below
+						'fill-color': ramp(0.5), // replaced by the repaint effect below
 						'fill-opacity': ['case', ['==', ['get', 'filtered'], true], FILTERED_OPACITY, opacity]
 					}
 				},
@@ -218,12 +217,13 @@
 		load(rows, pitch, showFiltered, filterUrl, clipShape);
 	});
 
-	// Repaint on its own, so dragging the scale limits never rebuilds the cells.
+	// Repaint on its own, so dragging the scale limits or switching the colour
+	// scheme never rebuilds the cells.
 	$effect(() => {
 		const lo = scaleMin ?? dataDomain?.min;
 		const hi = scaleMax ?? dataDomain?.max;
 		if (!layerReady || lo == null || hi == null || !map.getLayer(LAYER_ID)) return;
-		map.setPaintProperty(LAYER_ID, 'fill-color', colorExpression(lo, hi));
+		map.setPaintProperty(LAYER_ID, 'fill-color', colorExpression(lo, hi, ramp));
 	});
 
 	// Hiding is a layout flip, not an unmount: the cells, their domain and the

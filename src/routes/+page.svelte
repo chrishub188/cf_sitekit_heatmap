@@ -1,4 +1,5 @@
 <script>
+	import { onMount } from 'svelte';
 	import SiteMap from '$lib/components/SiteMap.svelte';
 	import SiteSwitch from '$lib/components/SiteSwitch.svelte';
 	import ResolutionSwitch from '$lib/components/ResolutionSwitch.svelte';
@@ -16,6 +17,7 @@
 	import AiWatermark from '$lib/components/AiWatermark.svelte';
 	import RecenterButton from '$lib/components/RecenterButton.svelte';
 	import { customStyle } from '$lib/style.js';
+	import { DEFAULT_SCHEME, isScheme, rampFor } from '$lib/colorSchemes.js';
 	import {
 		SITES,
 		RESOLUTIONS,
@@ -45,6 +47,32 @@
 	let scaleMin = $state(null);
 	/** @type {number | null} */
 	let scaleMax = $state(null);
+	// Colour scheme picked from the legend, remembered in this browser so a
+	// reload keeps whatever is being tried out.
+	const SCHEME_KEY = 'heatmap-color-scheme';
+	let colorScheme = $state(DEFAULT_SCHEME);
+	let schemeReversed = $state(false);
+	let schemeLoaded = $state(false);
+	const ramp = $derived(rampFor(colorScheme, schemeReversed));
+	onMount(() => {
+		try {
+			const saved = JSON.parse(localStorage.getItem(SCHEME_KEY) ?? 'null');
+			if (isScheme(saved?.id)) colorScheme = saved.id;
+			schemeReversed = saved?.reversed === true;
+		} catch {
+			// no storage (private window, blocked site data) — keep the default
+		}
+		schemeLoaded = true;
+	});
+	$effect(() => {
+		const value = JSON.stringify({ id: colorScheme, reversed: schemeReversed });
+		if (!schemeLoaded) return; // don't overwrite the saved choice before it's read
+		try {
+			localStorage.setItem(SCHEME_KEY, value);
+		} catch {
+			// not persisted; the choice still applies for this session
+		}
+	});
 	// A dropped logfile of tree placements. The camera never follows it: a log is
 	// adopted by the nearest of the three sites, or rejected, so the map only
 	// ever frames a site we have data for.
@@ -430,6 +458,7 @@
 			{showFiltered}
 			{scaleMin}
 			{scaleMax}
+			{ramp}
 			visible={mode === 'heatmap' && showHeatmap}
 			ondomain={(d) => (domain = d)}
 		/>
@@ -499,6 +528,10 @@
 					scaleMin = null;
 					scaleMax = null;
 				}}
+				scheme={colorScheme}
+				reversed={schemeReversed}
+				onscheme={(id) => (colorScheme = id)}
+				onreverse={(v) => (schemeReversed = v)}
 			/>
 			<div class="row">
 				<SegmentedSwitch options={CLIP_SHAPES} active={clipShape} onselect={(id) => (clipShape = id)} />
