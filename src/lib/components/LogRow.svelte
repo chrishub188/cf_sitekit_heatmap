@@ -1,5 +1,6 @@
 <script>
 	import SegmentedSwitch from '$lib/components/SegmentedSwitch.svelte';
+	import DropHint from '$lib/components/DropHint.svelte';
 	import { OVERLAY_MODES } from '$lib/sites.js';
 
 	let {
@@ -56,6 +57,7 @@
 		<!-- No log yet: the row is the affordance, since drag and drop alone
 		     leaves nothing to discover. -->
 		<button class="load" onclick={() => picker.click()}>+ Load logfile</button>
+		<DropHint title="Drag a logfile anywhere onto the map" />
 	{/if}
 
 	{#if name || error}

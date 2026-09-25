@@ -29,6 +29,7 @@
 	import { clipTest } from '$lib/clip.js';
 	import { gridToRows, requestEnvGrid } from '$lib/envgrid.js';
 	import { loadLocalGrid } from '$lib/localgrid.js';
+	import { customLayer, toLonLatFeatures } from '$lib/planning.js';
 
 	let active = $state(0);
 	let resolution = $state('1m');
@@ -69,6 +70,15 @@
 	// Planning layers switched on. Ids carry the site folder, so each site keeps
 	// its own selection across tab switches. Replaced, not mutated, on a toggle.
 	let planning = $state(/** @type {Set<string>} */ (new Set()));
+	// Dropped GeoJSON files, drawn by the planning overlay and listed in its
+	// panel. Raw: the features are only ever replaced, never edited in place.
+	let customLayers = $state.raw(/** @type {ReturnType<typeof customLayer>[]} */ ([]));
+	let customCount = 0; // never reused, so a removed file's colour and id stay retired
+	/** @type {string | null} */
+	let customError = $state(null);
+	let planningOpen = $state(false);
+	// How far from a site's centre a dropped file may be and still switch to it.
+	const CUSTOM_MATCH_M = 500;
 	// Off hides the heatmap cells, leaving the planning areas (or the bare map).
 	let showHeatmap = $state(true);
 
@@ -246,6 +256,80 @@
 		logError = message;
 	}
 
+	const GEOJSON_TYPES = new Set([
+		'FeatureCollection', 'Feature', 'Point', 'MultiPoint', 'LineString',
+		'MultiLineString', 'Polygon', 'MultiPolygon'
+	]);
+
+	// A dropped file is GeoJSON if it says so by extension, or if it parses as
+	// JSON with a GeoJSON `type`. Logfiles are pseudo-JSON and never parse, so
+	// they fall through to the log parser untouched.
+	/** @param {string} name @param {string} text @returns {any} the parsed object, or null for a logfile */
+	function asGeoJson(name, text) {
+		const byName = /\.geojson$/i.test(name);
+		try {
+			const json = JSON.parse(text);
+			if (GEOJSON_TYPES.has(json?.type)) return json;
+		} catch (err) {
+			if (byName) throw new Error(`${name} is not valid JSON`);
+			return null;
+		}
+		if (byName) throw new Error(`${name} has no GeoJSON type`);
+		return null;
+	}
+
+	/** @param {string} name @param {any} geojson */
+	function addCustomLayer(name, geojson) {
+		const features = toLonLatFeatures(geojson);
+		if (features.length === 0) throw new Error(`No geometries found in ${name}`);
+		const layer = customLayer(name, features, customCount++);
+		customLayers = [...customLayers, layer];
+		togglePlanning(layer.id, true);
+		customError = null;
+		planningOpen = true;
+		// Like a logfile, a file at one of the sites brings that site on screen;
+		// one elsewhere is kept, but the camera stays where it is.
+		const match = nearestSite(roughCenter(features), CUSTOM_MATCH_M);
+		if (match) active = match.index;
+	}
+
+	// Midpoint of the features' extent — enough to tell which site they're at.
+	/** @param {any[]} features @returns {number[]} */
+	function roughCenter(features) {
+		let [w, s, e, n] = [Infinity, Infinity, -Infinity, -Infinity];
+		/** @param {any} c */
+		const walk = (c) => {
+			if (typeof c[0] !== 'number') return c.forEach(walk);
+			w = Math.min(w, c[0]);
+			e = Math.max(e, c[0]);
+			s = Math.min(s, c[1]);
+			n = Math.max(n, c[1]);
+		};
+		for (const f of features) walk(f.geometry.coordinates);
+		return [(w + e) / 2, (s + n) / 2];
+	}
+
+	/** @param {string} id */
+	function removeCustomLayer(id) {
+		customLayers = customLayers.filter((l) => l.id !== id);
+		togglePlanning(id, false);
+	}
+
+	// From the panel's import button: GeoJSON only, so anything else is an error
+	// there rather than being tried as a logfile.
+	/** @param {File} file */
+	async function importGeoJson(file) {
+		try {
+			const { name, text } = await readLogFile(file);
+			const geojson = asGeoJson(name, text);
+			if (!geojson) throw new Error(`${name} is not GeoJSON`);
+			addCustomLayer(name, geojson);
+		} catch (err) {
+			customError = err instanceof Error ? err.message : String(err);
+			planningOpen = true;
+		}
+	}
+
 	/** @param {File} file */
 	async function loadFile(file) {
 		let name, text;
@@ -253,6 +337,18 @@
 			({ name, text } = await readLogFile(file));
 		} catch (err) {
 			reportError(err.message);
+			return;
+		}
+
+		try {
+			const geojson = asGeoJson(name, text);
+			if (geojson) {
+				addCustomLayer(name, geojson);
+				return;
+			}
+		} catch (err) {
+			customError = err instanceof Error ? err.message : String(err);
+			planningOpen = true;
 			return;
 		}
 
@@ -318,7 +414,7 @@
 			visible={mode === 'heatmap' && showHeatmap}
 			ondomain={(d) => (domain = d)}
 		/>
-		<PlanningOverlay {map} {site} enabled={planning} />
+		<PlanningOverlay {map} {site} enabled={planning} custom={customLayers} />
 		{#if interventions.length}
 			<TreeOverlay
 				{map}
@@ -359,7 +455,16 @@
 		{/if}
 	</div>
 	<div class="corner">
-		<PlanningPanel {site} enabled={planning} ontoggle={togglePlanning} />
+		<PlanningPanel
+			{site}
+			enabled={planning}
+			custom={customLayers}
+			error={customError}
+			bind:open={planningOpen}
+			ontoggle={togglePlanning}
+			onremove={removeCustomLayer}
+			onfile={importGeoJson}
+		/>
 		<ControlPanel>
 			<!-- Always mounted: with no data loaded the scale row stays in place and
 			     simply shows empty value boxes, so the panel never changes height. -->

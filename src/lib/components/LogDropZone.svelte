@@ -3,7 +3,7 @@
 	// full-viewport element would take pointer events away from the map, and
 	// `pointer-events: none` on it would stop `drop` firing at all.
 	let {
-		onfile, // (File) => void — reading and parsing are the caller's job
+		onfile, // (File) => void — reading, parsing and telling a logfile from GeoJSON are the caller's job
 		onerror // (message) => void
 	} = $props();
 
@@ -21,7 +21,7 @@
 		const files = Array.from(e.dataTransfer?.files ?? []);
 		if (files.length === 0) return;
 		if (files.length > 1) {
-			onerror?.('Drop one logfile at a time');
+			onerror?.('Drop one file at a time');
 			return;
 		}
 		onfile?.(files[0]);
@@ -46,7 +46,7 @@
 />
 
 {#if dragging}
-	<div class="veil"><span>Drop logfile</span></div>
+	<div class="veil"><span>Drop logfile or GeoJSON</span></div>
 {/if}
 
 <style>

@@ -21,6 +21,10 @@ export const PLANTING_INK = '#6F8A57';
 export const PLANNING_BOUNDARY = '#5E554A'; // the 00 outline, dashed and unfilled
 export const PLANNING_RESTRICTION_COLORS = ['#7B5EA7', '#4A6A8A', '#B08A2E', '#A4487A', '#5C8C84', '#8A5A3C'];
 export const PLANNING_DESIGN = '#2F6B4F'; // the leftover design area
+// Dropped GeoJSON files, in drop order. Stronger than the planning colours so
+// an ad-hoc layer doesn't get lost among them, and kept off the heatmap's
+// red–yellow–blue ramp.
+export const CUSTOM_COLORS = ['#E7298A', '#1B9E77', '#222222', '#7570B3', '#66A61E', '#A6761D'];
 
 // --- expression helpers ----------------------------------------------------
 const kind = (...kinds) => ['match', ['get', 'kind'], kinds, true, false];
