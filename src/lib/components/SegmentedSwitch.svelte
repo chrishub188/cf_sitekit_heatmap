@@ -1,6 +1,7 @@
 <script>
 	// A row of mutually exclusive buttons: {id, label, disabled?, title?}[]. Used
-	// for the clip shapes, the overlay mode switch and the before/after switch.
+	// for the clip shapes, the overlay mode switch, the before/after switch, the
+	// resolution and the basemap.
 	let { options, active, onselect } = $props();
 </script>
 

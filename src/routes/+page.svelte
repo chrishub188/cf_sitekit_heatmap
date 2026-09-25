@@ -2,7 +2,6 @@
 	import { onMount } from 'svelte';
 	import SiteMap from '$lib/components/SiteMap.svelte';
 	import SiteSwitch from '$lib/components/SiteSwitch.svelte';
-	import ResolutionSwitch from '$lib/components/ResolutionSwitch.svelte';
 	import HeatmapToggle from '$lib/components/HeatmapToggle.svelte';
 	import FilteredToggle from '$lib/components/FilteredToggle.svelte';
 	import SegmentedSwitch from '$lib/components/SegmentedSwitch.svelte';
@@ -16,7 +15,7 @@
 	import Legend from '$lib/components/Legend.svelte';
 	import AiWatermark from '$lib/components/AiWatermark.svelte';
 	import RecenterButton from '$lib/components/RecenterButton.svelte';
-	import { customStyle } from '$lib/style.js';
+	import { customStyle, SATELLITE_LAYERS } from '$lib/style.js';
 	import { DEFAULT_SCHEME, isScheme, rampFor } from '$lib/colorSchemes.js';
 	import {
 		SITES,
@@ -31,7 +30,7 @@
 	import { clipTest, loadPolygon } from '$lib/clip.js';
 	import { gridToRows, requestEnvGrid } from '$lib/envgrid.js';
 	import { loadLocalGrid } from '$lib/localgrid.js';
-	import { customLayer, toLonLatFeatures } from '$lib/planning.js';
+	import { customLayer, planningLayers, toLonLatFeatures } from '$lib/planning.js';
 
 	let active = $state(0);
 	let resolution = $state('1m');
@@ -109,6 +108,38 @@
 	const CUSTOM_MATCH_M = 500;
 	// Off hides the heatmap cells, leaving the planning areas (or the bare map).
 	let showHeatmap = $state(true);
+	// Drawn site plan or aerial imagery under the overlays.
+	const BASEMAPS = [
+		{ id: 'plan', label: 'Buildings' },
+		{ id: 'satellite', label: 'Satellite' }
+	];
+	let basemap = $state('plan');
+	/** @param {{ group: string, boundary: boolean }} layer */
+	const isRestriction = (layer) => layer.group === 'restriction' && !layer.boundary;
+	/** @param {string} id */
+	function selectBasemap(id) {
+		// Each basemap brings its own set of layers, once, on the switch; every
+		// toggle stays free to change afterwards. Satellite is for checking the
+		// planning areas against the ground, so it shows the restriction layers
+		// (every site's, so a site switch keeps them on) and any imported files,
+		// but not the Räumliche Abgrenzung outline or the Entwurfsfläche; and it
+		// clears the heatmap and Schwarzplan off the imagery. Buildings goes back
+		// to the climate view.
+		if (id === basemap) return;
+		const satellite = id === 'satellite';
+		showHeatmap = !satellite;
+		showFiltered = !satellite;
+		const restrictions = SITES.flatMap((s) => planningLayers(s).filter(isRestriction));
+		planning = satellite ? new Set([...restrictions, ...customLayers].map((l) => l.id)) : new Set();
+		basemap = id;
+	}
+	// Set by the map's one 'load' event. `isStyleLoaded()` can't stand in for it:
+	// it drops back to false whenever tiles are loading.
+	let styleReady = $state(false);
+	$effect(() => {
+		const visibility = basemap === 'satellite' ? 'visible' : 'none';
+		if (styleReady && map) for (const id of SATELLITE_LAYERS) map.setLayoutProperty(id, 'visibility', visibility);
+	});
 
 	/** @param {string} id @param {boolean} on */
 	function togglePlanning(id, on) {
@@ -443,7 +474,10 @@
 		mapStyle={customStyle}
 		bounds={viewBounds}
 		bearing={site.bearing}
-		onready={(m) => (map = m)}
+		onready={(m) => {
+			map = m;
+			m.once('load', () => (styleReady = true));
+		}}
 	/>
 	{#if map}
 		<Heatmap
@@ -481,12 +515,17 @@
 	<LogDropZone onfile={loadFile} onerror={reportError} />
 	<SiteSwitch sites={SITES} {active} onselect={(i) => (active = i)} />
 	<div class="top-right">
-		<HeatmapToggle active={showHeatmap} onselect={(v) => (showHeatmap = v)} />
-		<ResolutionSwitch
-			resolutions={resolutionOptions}
-			active={shownResolution.id}
-			onselect={(id) => (resolution = id)}
-		/>
+		<ControlPanel>
+			<div class="row">
+				<HeatmapToggle active={showHeatmap} onselect={(v) => (showHeatmap = v)} />
+				<SegmentedSwitch
+					options={resolutionOptions}
+					active={shownResolution.id}
+					onselect={(/** @type {string} */ id) => (resolution = id)}
+				/>
+			</div>
+			<SegmentedSwitch options={BASEMAPS} active={basemap} onselect={selectBasemap} />
+		</ControlPanel>
 	</div>
 	<div class="top">
 		{#if comparable}
@@ -579,13 +618,24 @@
 		width: fit-content;
 	}
 
-	/* Top right: heatmap on/off next to the resolution it's drawn at. */
+	/* Top right: one panel framed like the bottom-left one. Heatmap on/off next
+	   to the resolution it's drawn at, the basemap switch underneath. */
 	.top-right {
 		position: absolute;
 		top: 1rem;
 		right: 1rem;
-		display: flex;
-		gap: 0.4rem;
+	}
+
+	/* Hairline between the toggle and the resolution buttons, which take the
+	   rest of the row. */
+	.top-right .row > :global(nav) {
+		flex: 1;
+		border-left: 1px solid #cdc1a9;
+	}
+
+	/* Both rows' buttons share out the panel's width. */
+	.top-right :global(nav button) {
+		flex: 1;
 	}
 
 	/* Top centre, between the site tabs and the resolution switch. */
@@ -598,7 +648,7 @@
 		transform: translateX(-50%);
 	}
 
-	/* Same framing as the resolution switch, around the shared segmented switch. */
+	/* A pill ring around the shared segmented switch. */
 	.chip {
 		padding: 1px;
 		border: 1px solid #cdc1a9;
@@ -619,6 +669,14 @@
 		margin-left: auto;
 		padding-left: 0.2rem;
 		border-left: 1px solid #cdc1a9;
+	}
+
+	/* The imagery credits make the attribution long: give it all the width
+	   right of the bottom-left panel (about 27rem wide plus its 1rem inset; the
+	   rest covers a gap and the bar's own padding and info button), and only
+	   wrap once that runs out. */
+	.stage :global(.maplibregl-ctrl-bottom-right .maplibregl-ctrl-attrib) {
+		max-width: max(16rem, calc(100vw - 32rem));
 	}
 
 	:global(body) {

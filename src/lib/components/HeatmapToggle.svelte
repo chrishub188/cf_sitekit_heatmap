@@ -18,21 +18,20 @@
 </button>
 
 <style>
+	/* Borderless: the page's top-right panel frames it, with a hairline to the
+	   resolution buttons beside it. */
 	button {
 		display: flex;
 		align-items: center;
 		gap: 0.55rem;
 		padding: 0.5rem 0.9rem;
-		border: 1px solid #cdc1a9;
+		border: 0;
 		font: 400 0.72rem/1.2 ui-sans-serif, system-ui, sans-serif;
 		letter-spacing: 0.09em;
 		text-transform: uppercase;
 		color: #b3a891;
 		background: #f1ebdf;
 		cursor: pointer;
-		/* Same outer height as the resolution switch, whose 1px padding
-		   frames its buttons inside the border. */
-		padding-block: calc(0.5rem + 1px);
 	}
 
 	button:hover {

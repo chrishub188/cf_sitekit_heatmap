@@ -5,6 +5,45 @@ import { SITE_AREAS } from '$lib/sites.js';
 
 const SRC = 'versatiles-shortbread';
 
+// --- aerial imagery --------------------------------------------------------
+// The states' own 20 cm orthophotos (open data, dl-de/by-2-0): sharper than
+// global imagery, dated, and the survey the planning areas are drawn against.
+// Every site lies in one of the two states, so there is no global fallback —
+// one underneath would still be fetched, credited, and flash up first while
+// the slower WMS tiles load. Outside both states the site plan shows through.
+// Each state's WMS clips at its own border and leaves the rest transparent, so
+// the two stack cleanly across the Rhine at Mannheim/Ludwigshafen.
+const YEAR = new Date().getFullYear(); // the licence cites the year of retrieval
+// Keeps one source's credit on one line, so a wrapping attribution breaks
+// between credits rather than inside one.
+/** @param {string} html */
+const credit = (html) => `<span style="white-space: nowrap">${html}</span>`;
+/** @param {string} url @param {string} layer */
+const wms = (url, layer) =>
+	`${url}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=${layer}&STYLES=` +
+	'&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/png&TRANSPARENT=TRUE';
+const IMAGERY = {
+	'satellite-rlp': {
+		type: 'raster',
+		tiles: [wms('https://geo4.service24.rlp.de/wms/rp_dop20.fcgi', 'rp_dop20')],
+		tileSize: 256,
+		bounds: [6.04, 48.9, 8.62, 51.01], // the service's advertised extent
+		maxzoom: 20, // 20 cm pixels, so z20 is native on high-DPI screens
+		attribution: credit(`©GeoBasis-DE / LVermGeoRP (${YEAR}), <a href="https://www.govdata.de/dl-de/by-2-0">dl-de/by-2-0</a>`)
+	},
+	'satellite-bw': {
+		type: 'raster',
+		tiles: [wms('https://owsproxy.lgl-bw.de/owsproxy/ows/WMS_LGL-BW_ATKIS_DOP_20_C', 'IMAGES_DOP_20_RGB')],
+		tileSize: 256,
+		bounds: [7.2, 47.4, 10.7, 50],
+		maxzoom: 20,
+		// The service's terms accept the short licence name in place of the long one.
+		attribution: credit(`LGL-BW (${YEAR}), <a href="https://www.govdata.de/dl-de/by-2-0">dl-de/by-2-0</a>`)
+	}
+};
+// Layer ids, bottom to top, switched on and off together by the basemap switch.
+export const SATELLITE_LAYERS = Object.keys(IMAGERY);
+
 export const PAPER = '#F1EBDF';
 const PAVING = '#E5DBC7';
 const EDGE = '#D5C9B1';
@@ -94,9 +133,10 @@ export const customStyle = {
 			tiles: ['https://tiles.versatiles.org/tiles/osm/{z}/{x}/{y}'],
 			minzoom: 0,
 			maxzoom: 14,
-			attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>'
+			attribution: credit('<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>')
 		},
-		sites: { type: 'geojson', data: SITE_AREAS }
+		sites: { type: 'geojson', data: SITE_AREAS },
+		...IMAGERY
 	},
 	layers: [
 		{ id: 'paper', type: 'background', paint: { 'background-color': PAPER } },
@@ -165,6 +205,10 @@ export const customStyle = {
 				'line-width': ['interpolate', ['exponential', 1.5], ['zoom'], 15, 0.4, 18, 0.9, 21, 2.4]
 			}
 		},
+
+		// Aerial imagery covers every basemap layer above when on, but stays below
+		// the overlays and the labels. Hidden until the basemap switch asks for it.
+		...SATELLITE_LAYERS.map((id) => ({ id, type: 'raster', source: id, layout: { visibility: 'none' } })),
 
 		// --- study area, from the uploaded bbox GeoJSON ---
 		// {
