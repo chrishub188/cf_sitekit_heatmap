@@ -26,7 +26,7 @@
 		nearestSite
 	} from '$lib/sites.js';
 	import { parseLogfile, readLogFile } from '$lib/logfile.js';
-	import { clipTest } from '$lib/clip.js';
+	import { clipTest, loadPolygon } from '$lib/clip.js';
 	import { gridToRows, requestEnvGrid } from '$lib/envgrid.js';
 	import { loadLocalGrid } from '$lib/localgrid.js';
 	import { customLayer, toLonLatFeatures } from '$lib/planning.js';
@@ -107,9 +107,28 @@
 			resolutionOptions[0]
 	);
 	const local = $derived(shownResolution.source === 'local');
-	// The 'full' shape swaps in the wider rect for both the clip and the camera;
-	// plaza and circle keep the 100 m framing they already assume.
-	const viewBounds = $derived(clipShape === 'full' ? site.fullBounds : site.bounds);
+	// The plaza outline's own extent, so the camera frames the polygon rather
+	// than the 100 m box around the site centre, which it can be off-centre from.
+	let plazaBounds = $state(/** @type {{ url: string, bounds: number[] } | null} */ (null));
+	$effect(() => {
+		const url = site.filterUrl;
+		if (clipShape !== 'plaza' || !url || plazaBounds?.url === url) return;
+		loadPolygon(url).then((rings) => {
+			if (!rings) return;
+			const xs = rings[0].map((p) => p[0]);
+			const ys = rings[0].map((p) => p[1]);
+			plazaBounds = { url, bounds: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] };
+		});
+	});
+	// The 'full' shape swaps in the wider rect for both the clip and the camera,
+	// 'plaza' frames its polygon once loaded; circle keeps the 100 m framing.
+	const viewBounds = $derived(
+		clipShape === 'full'
+			? site.fullBounds
+			: clipShape === 'plaza' && plazaBounds?.url === site.filterUrl
+				? plazaBounds.bounds
+				: site.bounds
+	);
 	// Only the log's own site swaps in the recalculated grid; the other tabs, and
 	// this one until the backend answers, keep showing the baseline.
 	const simulated = $derived(

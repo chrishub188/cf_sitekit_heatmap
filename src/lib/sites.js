@@ -28,9 +28,10 @@ export const RESOLUTIONS = [
 ];
 
 // Four ways to clip the data to a site: the square bbox (SIZE above), the full
-// extent the grid covers (FULL_SIZE), the hand-traced plaza outline shipped per
-// site under filter_location/, or a RADIUS-metre circle around the centre
-// point. The two rectangles sit next to each other so they read as a pair.
+// extent the grid covers (FULL_SIZE), the plaza outline (the planning boundary
+// where a site has one, else the hand-traced one under filter_location/), or a
+// RADIUS-metre circle around the centre point. The two rectangles sit next to
+// each other so they read as a pair.
 export const CLIP_SHAPES = [
 	{ id: 'square', label: `${SIZE}`, unit: 'm' },
 	{ id: 'full', label: `${FULL_SIZE}`, unit: 'm' },
@@ -67,7 +68,7 @@ export const SITES = [
 		note: `Mannheim · ${FULL_SIZE} m`,
 		center: [8.466304325, 49.486004875], // dahlbergplatz_bbox_300m.geojson
 		bearing: 0, // lines the Quadrate grid up with the screen edge
-		filterUrl: '/geojson/filter_location/dalbergplatz.geojson',
+		filterUrl: '/geojson/planning_areas/Dalbergplatz/00_MA_RaeumlicheAbgrenzung.geojson',
 		grid5mUrl: '/data/5mx5m/dalbergplatz.csv',
 		planning: {
 			dir: 'Dalbergplatz',
@@ -87,7 +88,7 @@ export const SITES = [
 		note: `Kaiserslautern · ${FULL_SIZE} m`,
 		center: [7.76846, 49.44426], // Am_Altenhof_bbox_300m.geojson
 		bearing: 0,
-		filterUrl: '/geojson/filter_location/am_altenhof.geojson',
+		filterUrl: '/geojson/planning_areas/Am_Altenhof/00_KL_RaeumlicheAbgrenzung.geojson',
 		grid5mUrl: null, // not modelled at 5 m; the CSV in static/data/5mx5m/ is header-only
 		planning: {
 			dir: 'Am_Altenhof',

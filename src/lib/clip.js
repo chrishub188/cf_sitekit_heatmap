@@ -3,6 +3,7 @@
 // disappear on exactly the same boundary.
 
 import { haversine } from '$lib/geo.js';
+import { toLonLatFeatures } from '$lib/planning.js';
 
 // Even-odd ray cast; ring[0] is the outer boundary, any further rings are holes.
 /** @param {number} x @param {number} y @param {number[][]} ring */
@@ -53,8 +54,8 @@ export async function loadPolygon(filterUrl) {
 	try {
 		const res = await fetch(filterUrl);
 		if (res.ok) {
-			const geojson = await res.json();
-			const geometry = geojson.features?.[0]?.geometry;
+			// Planning boundaries come in EPSG:25832; hand-traced outlines are lon/lat.
+			const geometry = toLonLatFeatures(await res.json())[0]?.geometry;
 			if (geometry?.type === 'Polygon') rings = geometry.coordinates;
 		}
 	} catch (err) {

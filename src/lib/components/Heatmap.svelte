@@ -35,7 +35,7 @@
 	const COARSE_ABOVE = 8000; // cells
 	const COLOR_STOPS = 16; // samples of the continuous ramp handed to MapLibre's interpolate
 	const FILTERED_COLOR = '#141414'; // faint ghost tint for excluded/invalid cells — no stroke, so the map stays visible
-	const FILTERED_OPACITY = 0.025;
+	const FILTERED_OPACITY = 0.03;
 
 	// Cells carry their raw PET and are colored by a paint expression rather than
 	// a baked-in color, so moving the scale limits is a repaint, not a reload.
