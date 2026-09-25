@@ -168,10 +168,11 @@
 	const local = $derived(shownResolution.source === 'local');
 	// The plaza outline's own extent, so the camera frames the polygon rather
 	// than the 100 m box around the site centre, which it can be off-centre from.
+	// The outline is the site's Räumliche Abgrenzung, so satellite frames it too.
 	let plazaBounds = $state(/** @type {{ url: string, bounds: number[] } | null} */ (null));
 	$effect(() => {
 		const url = site.filterUrl;
-		if (clipShape !== 'plaza' || !url || plazaBounds?.url === url) return;
+		if ((clipShape !== 'plaza' && basemap !== 'satellite') || !url || plazaBounds?.url === url) return;
 		loadPolygon(url).then((rings) => {
 			if (!rings) return;
 			const xs = rings[0].map((p) => p[0]);
@@ -187,6 +188,15 @@
 			: clipShape === 'plaza' && plazaBounds?.url === site.filterUrl
 				? plazaBounds.bounds
 				: site.bounds
+	);
+	// Where the camera goes. Satellite is for checking the planning areas, so it
+	// frames their Räumliche Abgrenzung whatever the clip shape; a site without
+	// one (TH-Vorplatz) keeps the clip shape's framing. Kept apart from
+	// viewBounds, which the heatmap and trees also clip to.
+	const cameraBounds = $derived(
+		basemap === 'satellite' && site.filterUrl && plazaBounds?.url === site.filterUrl
+			? plazaBounds.bounds
+			: viewBounds
 	);
 	// Only the log's own site swaps in the recalculated grid; the other tabs, and
 	// this one until the backend answers, keep showing the baseline.
@@ -472,7 +482,7 @@
 <div class="stage">
 	<SiteMap
 		mapStyle={customStyle}
-		bounds={viewBounds}
+		bounds={cameraBounds}
 		bearing={site.bearing}
 		onready={(m) => {
 			map = m;
@@ -538,7 +548,7 @@
 			</div>
 		{/if}
 		{#if map}
-			<RecenterButton {map} bounds={viewBounds} bearing={site.bearing} />
+			<RecenterButton {map} bounds={cameraBounds} bearing={site.bearing} />
 		{/if}
 	</div>
 	<div class="corner">
