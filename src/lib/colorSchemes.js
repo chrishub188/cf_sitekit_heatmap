@@ -1,5 +1,5 @@
-// Colour schemes selectable from the legend. All come from d3-scale-chromatic
-// (the same set Vega and Observable list), normalised so t=0 is the low (cool)
+// Colour schemes selectable from the legend. A selection from d3-scale-chromatic
+// (all of its diverging ramps, some sequential ones), normalised so t=0 is the low (cool)
 // end of the PET range and t=1 the high (hot) end. `invert` flags the ones whose
 // native d3 direction runs the other way, e.g. the diverging ramps start at red.
 
@@ -8,6 +8,11 @@ import {
 	interpolateRdBu,
 	interpolateSpectral,
 	interpolatePuOr,
+	interpolateBrBG,
+	interpolatePRGn,
+	interpolatePiYG,
+	interpolateRdGy,
+	interpolateRdYlGn,
 	interpolateYlOrRd,
 	interpolateOrRd,
 	interpolateInferno,
@@ -28,6 +33,11 @@ export const COLOR_SCHEMES = [
 	{ id: 'RdBu', label: 'Red–Blue', group: 'diverging', interpolate: interpolateRdBu, invert: true },
 	{ id: 'Spectral', label: 'Spectral', group: 'diverging', interpolate: interpolateSpectral, invert: true },
 	{ id: 'PuOr', label: 'Purple–Orange', group: 'diverging', interpolate: interpolatePuOr, invert: false },
+	{ id: 'RdYlGn', label: 'Red–Yellow–Green', group: 'diverging', interpolate: interpolateRdYlGn, invert: true },
+	{ id: 'BrBG', label: 'Brown–Teal', group: 'diverging', interpolate: interpolateBrBG, invert: true },
+	{ id: 'PiYG', label: 'Pink–Green', group: 'diverging', interpolate: interpolatePiYG, invert: true },
+	{ id: 'PRGn', label: 'Purple–Green', group: 'diverging', interpolate: interpolatePRGn, invert: true },
+	{ id: 'RdGy', label: 'Red–Grey', group: 'diverging', interpolate: interpolateRdGy, invert: true },
 	{ id: 'YlOrRd', label: 'Yellow–Orange–Red', group: 'sequential', interpolate: interpolateYlOrRd, invert: false },
 	{ id: 'OrRd', label: 'Orange–Red', group: 'sequential', interpolate: interpolateOrRd, invert: false },
 	{ id: 'Inferno', label: 'Inferno', group: 'sequential', interpolate: interpolateInferno, invert: false },
