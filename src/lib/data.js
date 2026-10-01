@@ -49,7 +49,7 @@ import { metresBetween } from './envGrid.js';
 /** @typedef {{gap: number, roundness: number, excludeNtzg: number[]}} ClipOptions */
 /** @typedef {{type: 'Feature', properties: {filtered: boolean, pet?: number}, geometry: {type: 'Polygon', coordinates: number[][][]}}} CellFeature */
 /** A loaded grid, ready to clip.
- * @typedef {{key: string, center: LngLat|null, radius: number, sessionId: string|null, lng: Float64Array, lat: Float64Array, pet: Float64Array, filtered: Uint8Array, offsets: number[][], features: (CellFeature|undefined)[]}} Entry */
+ * @typedef {{key: string, sourceKey: string, center: LngLat|null, radius: number, sessionId: string|null, lng: Float64Array, lat: Float64Array, pet: Float64Array, filtered: Uint8Array, offsets: number[][], features: (CellFeature|undefined)[]}} Entry */
 
 // Vertices per cell outline. Every one of the ~7850 cells inside the clip is
 // re-triangulated and re-filled on each repaint, so this multiplies straight
@@ -201,6 +201,7 @@ export function createHeatmapData(/** @type {(() => void) | undefined} */ onSwap
 
 			return {
 				key,
+				sourceKey: source.key,
 				// Where this grid reaches, for covers() above.
 				center: raw.center ?? null,
 				radius: raw.radius ?? Infinity,
@@ -226,8 +227,13 @@ export function createHeatmapData(/** @type {(() => void) | undefined} */ onSwap
 		return entry;
 	}
 
-	const emit = (/** @type {LngLat} */ center, /** @type {number} */ radius) =>
-		active ? clip(active, center, radius) : EMPTY;
+	/** Source key of the grid the last emit clipped from, or null for an empty result. @type {string|null} */
+	let emitted = null;
+
+	const emit = (/** @type {LngLat} */ center, /** @type {number} */ radius) => {
+		emitted = active?.sourceKey ?? null;
+		return active ? clip(active, center, radius) : EMPTY;
+	};
 
 	/**
 	 * @param {GridSource} source
@@ -267,5 +273,13 @@ export function createHeatmapData(/** @type {(() => void) | undefined} */ onSwap
 		return emit(center, radius);
 	}
 
-	return { refresh };
+	// Which grid the last refresh result was actually clipped from. Not
+	// necessarily the one the caller asked for — while a new grid loads in the
+	// background the old one keeps being clipped (see refresh) — and not
+	// necessarily `active` either, which a fast load can swap in before the
+	// caller has even applied the result. A host waiting to hear that its grid
+	// is on screen (gridPush.js) needs exactly this.
+	const emittedSourceKey = () => emitted;
+
+	return { refresh, emittedSourceKey };
 }

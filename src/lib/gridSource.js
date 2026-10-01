@@ -48,6 +48,7 @@
 import { writable } from 'svelte/store';
 import { gridToColumns, metresBetween, snapTo } from './envGrid.js';
 import { FETCH_RADIUS_M, GRID_ORDER, GRID_NORTH, GRID_TYPE, INITIAL_EPOCH } from './gridConfig.js';
+import { PUSH_KEY_PREFIX, gridBuilt, gridFailed } from './gridPush.js';
 import { RADIUS } from './viewport.js';
 
 /** @typedef {[number, number]} LngLat */
@@ -232,5 +233,36 @@ export function apiSource(center, epoch, attempt, interventions = [], sessionId 
 		center: at,
 		radius: FETCH_RADIUS_M,
 		load: () => loadGrid(key, at, epoch, interventions, null)
+	};
+}
+
+/**
+ * A grid the host pushed (`?unity=1`, see gridPush.js) — nothing to request,
+ * so none of the pacing, abort or backoff above applies. The key is the
+ * host's gridId: the host only issues a new id for a new grid, so a re-send
+ * never looks like a different grid to data.js or Heatmap.svelte.
+ *
+ * Conversion runs in `load`, not when the message arrives, so it happens once
+ * per key however often the descriptor is rebuilt — and its outcome is
+ * reported back for the host's ack.
+ * @param {{gridId: number, grid: import('./gridPush.js').EnvGridResponse}} pushed
+ */
+export function pushSource({ gridId, grid }) {
+	const c = grid.centerCoordinate;
+	return {
+		key: `${PUSH_KEY_PREFIX}${gridId}`,
+		center: /** @type {LngLat} */ ([c.longitude, c.latitude]),
+		radius: grid.radiusInMeters,
+		load: async () => {
+			const started = performance.now();
+			try {
+				const columns = gridToColumns(grid, { order: GRID_ORDER, north: GRID_NORTH });
+				gridBuilt(gridId, performance.now() - started);
+				return columns;
+			} catch (err) {
+				gridFailed(gridId, err instanceof Error ? err.message : String(err));
+				throw err;
+			}
+		}
 	};
 }

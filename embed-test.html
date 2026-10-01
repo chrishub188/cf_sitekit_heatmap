@@ -25,7 +25,17 @@
 				<option>SEALED_GROUND_CATEGORY</option>
 			</select>
 		</label>
+		<label title="Quest mode: the page never fetches, it only draws grids pushed below"><input id="unity" type="checkbox"> unity=1</label>
 		<button id="load">Load</button>
+	</div>
+
+	<div class="row">
+		<button id="pushNew">Push new grid</button>
+		<button id="pushSame">Re-send same id</button>
+		<button id="pushOld">Push older id</button>
+		<button id="pushBroken">Push broken grid</button>
+		<label title="An EnvGrid response saved from /api/grid; without one, a synthetic grid around the current position is pushed">grid JSON <input id="gridFile" type="file" accept=".json,application/json"></label>
+		<output id="pushStatus"></output>
 	</div>
 
 	<div class="row">
@@ -50,14 +60,14 @@
 		<button id="plant">🌳 Plant here</button>
 		<button id="clearIv">Clear interventions</button>
 		<output id="ivStatus"></output>
-	</div>
-
-	<div class="row">
+		<span class="sep"></span>
 		<label>sessionId <input id="sessionId" size="20" placeholder="(none)"></label>
 		<button id="applySession">Apply</button>
 		<output id="sessionStatus"></output>
 	</div>
 
+	<details>
+	<summary>Hints</summary>
 	<p class="hint">
 		Watch the Network panel for <code>/api/grid</code>. With no sessionId set, expect
 		one request on load and then roughly one per 40 m walked — never one per pose, and
@@ -70,6 +80,15 @@
 		list should fetch again. Clear the sessionId field and re-apply an empty value to
 		switch back to normal walking-based requests.
 	</p>
+	<p class="hint">
+		<strong>unity=1</strong> stands in for the Quest app pushing the grid (see
+		<code>docs/unity-grid-push.md</code>). Expect <strong>no</strong> <code>/api/grid</code>
+		request at all — not on load, walking, interventions or refreshGrid — and no overlay
+		until a grid is pushed. Each push shows the page's ack: a new id draws and acks once
+		with timings, a re-send of the same id only re-acks, an older id gets no answer, and
+		a broken grid acks <code>ok:false</code> while the previous heatmap stays.
+	</p>
+	</details>
 </div>
 
 <iframe id="f"></iframe>
@@ -202,6 +221,9 @@
 		// the initial URL — see Interventions/sessionId in README.md.
 		url.searchParams.set('interventions', JSON.stringify(interventions));
 		url.searchParams.set('sessionId', el('sessionId').value);
+		if (el('unity').checked) url.searchParams.set('unity', '1');
+		gridId = 0;
+		showPush(el('unity').checked ? 'push mode — no grid until you push one' : '');
 		frame.src = url.toString();
 		show('loading…');
 		showIv();
@@ -307,20 +329,104 @@
 
 	el('applySession').onclick = () => postSession('applied');
 
+	// --- grid push (unity=1) ------------------------------------------------
+	//
+	// Plays the Quest app's part of docs/unity-grid-push.md: one postMessage per
+	// grid, tagged 'cf-temperature-grid', carrying the EnvGrid response as-is.
+	// The page acks through the TLab bridge; with no bridge in a desktop browser
+	// it posts the ack to its parent instead, which is what's shown here.
+
+	let gridId = 0;
+	let gridFromFile = null;
+
+	function showPush(note) {
+		el('pushStatus').textContent = `last gridId ${gridId}` + (note ? '  — ' + note : '');
+	}
+
+	// A synthetic EnvGrid response around the current position: same shape and
+	// size as the real thing (1 m pitch, gridData[row][column], rows north to
+	// south), PET varying smoothly across the scale plus a few null holes.
+	function syntheticGrid() {
+		const r = Number(el('radius').value) || 100;
+		const n = 2 * r + 1;
+		const phase = gridId; // each new grid looks visibly different
+		const gridData = [];
+		for (let y = 0; y < n; y++) {
+			const row = new Array(n);
+			for (let x = 0; x < n; x++) {
+				const hole = Math.hypot(x - n * 0.3, y - n * 0.6) < n * 0.06;
+				row[x] = hole ? null : Math.round((38.5 + 6 * Math.sin((x + phase * 7) / 17) * Math.cos(y / 23)) * 100) / 100;
+			}
+			gridData.push(row);
+		}
+		return {
+			sessionId: `synthetic-${phase}`,
+			centerCoordinate: { latitude: lat, longitude: lng },
+			radiusInMeters: r,
+			gridType: 'PET',
+			gridData
+		};
+	}
+
+	function pushGrid(id, grid, note) {
+		if (!ready) return showPush('iframe not loaded yet — press Load');
+		if (!el('unity').checked) return showPush('tick unity=1 and Load first');
+		frame.contentWindow.postMessage(
+			{ source: 'cf-temperature-grid', gridId: id, ackTarget: 'Site Map WebView', t: Date.now(), grid },
+			'*'
+		);
+		showPush(`sent id ${id} (${note})`);
+	}
+
+	el('pushNew').onclick = () => {
+		gridId++;
+		pushGrid(gridId, gridFromFile ?? syntheticGrid(), gridFromFile ? 'from file' : 'synthetic');
+	};
+	el('pushSame').onclick = () => pushGrid(gridId, gridFromFile ?? syntheticGrid(), 're-send');
+	el('pushOld').onclick = () => pushGrid(Math.max(0, gridId - 1), syntheticGrid(), 'older id — expect no ack');
+	el('pushBroken').onclick = () => {
+		gridId++;
+		pushGrid(gridId, { centerCoordinate: { latitude: lat, longitude: lng }, radiusInMeters: 100, gridData: 1 }, 'broken');
+	};
+
+	el('gridFile').onchange = async (e) => {
+		const file = e.target.files[0];
+		if (!file) return (gridFromFile = null);
+		try {
+			gridFromFile = JSON.parse(await file.text());
+			showPush(`loaded ${file.name} (${Math.round(file.size / 1024)} KB)`);
+		} catch {
+			gridFromFile = null;
+			showPush(`${file.name} is not valid JSON`);
+		}
+	};
+
+	window.addEventListener('message', (e) => {
+		const d = e.data;
+		if (d?.source !== 'cf-temperature-grid-ack') return;
+		showPush(`ack → ${d.target}.${d.method}(${d.message})`);
+		console.log('grid ack', d.target, d.method, d.message);
+	});
+
 	load();
 </script>
 
 <style>
-	body { margin: 0; font: 13px system-ui, sans-serif; }
-	.panel { padding: 8px 10px; border-bottom: 1px solid #ddd; }
-	.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
-	.sep { width: 1px; height: 18px; background: #ddd; }
-	label { display: inline-flex; gap: 4px; align-items: center; color: #444; }
-	button { padding: 3px 9px; }
+	/* Compact controls on top; the map takes whatever height is left. */
+	html, body { height: 100%; }
+	body { margin: 0; font: 11px system-ui, sans-serif; display: flex; flex-direction: column; }
+	.panel { flex: none; padding: 4px 8px; border-bottom: 1px solid #ddd; }
+	.row { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-bottom: 3px; }
+	.sep { width: 1px; height: 14px; background: #ddd; }
+	label { display: inline-flex; gap: 3px; align-items: center; color: #444; }
+	button, input, select { font: inherit; }
+	button { padding: 1px 6px; }
 	output { font-variant-numeric: tabular-nums; color: #666; }
-	.hint { margin: 4px 0 0; color: #777; max-width: 70ch; line-height: 1.45; }
-	code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; }
-	iframe { display: block; width: 100%; height: calc(100vh - 150px); border: 0; }
+	details { color: #777; }
+	summary { cursor: pointer; }
+	.hint { margin: 3px 0 0; max-width: 90ch; line-height: 1.4; }
+	code { background: #f2f2f2; padding: 0 3px; border-radius: 3px; }
+	iframe { display: block; flex: 1; min-height: 0; width: 100%; border: 0; }
 </style>
 </body>
 </html>

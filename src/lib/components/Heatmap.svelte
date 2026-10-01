@@ -12,7 +12,8 @@
 		excludeNtzg = [20, 21, 30, 32],
 		gap = 0.9, // fraction of the grid pitch each cell fills; the rest is gap
 		roundness = 5, // superellipse exponent for cell corners; 2 = ellipse, higher = squarer
-		opacity = 0.35
+		opacity = 0.35,
+		onapplied = undefined // (sourceKey) => void, after each hand-over to MapLibre — the key of the grid actually drawn
 	} = $props();
 
 	const SOURCE_ID = 'heatmap-cells';
@@ -47,10 +48,16 @@
 	// same centre now yields better data. Rebuilt directly rather than by
 	// poking a reactive flag — there is nothing to react to, and the effect
 	// below would have to be taught to ignore its own movement gate.
+	//
+	// It rebuilds the newest *requested* centre and source, not the last built
+	// one: a grid that loads almost instantly (a pushed grid, a cache hit) can
+	// land while the build that asked for it is still running, when nothing has
+	// been built for the new source yet. Queued behind that build, the rebuild
+	// then picks the swapped-in grid up instead of being dropped.
 	const heatmapData = createHeatmapData(() => {
-		if (!builtFor || !builtSource) return;
-		if (building) queued = { center: builtFor, source: builtSource };
-		else build(builtFor, builtSource);
+		if (!requested) return;
+		if (building) queued = requested;
+		else build(requested.center, requested.source);
 	});
 
 	// Colour lives in the paint property rather than in each feature, so the
@@ -93,6 +100,8 @@
 
 	/** @type {any} */
 	let latest = null; // newest clip result, read by apply() so a deferred apply can't use stale data
+	/** @type {string | null} */
+	let latestKey = null; // source key of the grid `latest` was clipped from — may lag the requested one
 	/** @type {[number, number] | null} */
 	let builtFor = null; // centre `latest` was built for
 	let builtKey = null; // key of the source `latest` was built from
@@ -101,6 +110,8 @@
 	let building = false;
 	/** @type {{ center: [number, number], source: any } | null} */
 	let queued = null; // newest request made while a build was in flight
+	/** @type {{ center: [number, number], source: any } | null} */
+	let requested = null; // newest request of any kind, for a rebuild after a background swap
 
 	function movedEnough(from, to) {
 		if (!from) return true;
@@ -115,6 +126,7 @@
 		if (!latest) return;
 		ensureLayer();
 		map.getSource(SOURCE_ID)?.setData(latest);
+		onapplied?.(latestKey);
 	}
 
 	// One build at a time, and only the newest requested centre is ever queued —
@@ -128,6 +140,7 @@
 				roundness,
 				excludeNtzg
 			});
+			latestKey = heatmapData.emittedSourceKey();
 			builtFor = target;
 			builtKey = targetSource.key;
 			builtSource = targetSource;
@@ -160,6 +173,7 @@
 			queued = null;
 		} else if (!movedEnough(builtFor, target)) return;
 
+		requested = { center: target, source: targetSource };
 		if (building) queued = { center: target, source: targetSource };
 		else build(target, targetSource);
 	});

@@ -12,6 +12,7 @@
 //   gridepoch=<n>         bump to bypass every cache              (0)
 //   gridorder=xy|yx       outer index of gridData: x or y         (yx)
 //   gridnorth=top|bottom  whether row 0 is the northern edge      (top)
+//   unity=1               the host pushes the grid; never fetch   (off)
 //
 // The last two are an escape hatch, not a setting anyone should need: see
 // envGrid.js for why the grid's orientation can't be detected at runtime and
@@ -76,3 +77,11 @@ export const GRID_ORDER = /** @type {'xy' | 'yx'} */ (oneOf('gridorder', ['xy', 
 
 /** 'top' — the first column of a line is the northern edge; 'bottom' — the southern. */
 export const GRID_NORTH = /** @type {'top' | 'bottom'} */ (oneOf('gridnorth', ['top', 'bottom'], 'top'));
+
+/**
+ * True when the Unity/Quest host supplies the grid itself (`?unity=1`): the
+ * page then never requests one and only draws what gridPush.js receives. The
+ * host owns every reason to fetch — interventions, sessions, walking out of
+ * the grid, retries — see docs/unity-grid-push.md.
+ */
+export const IS_UNITY = params.get('unity') === '1';

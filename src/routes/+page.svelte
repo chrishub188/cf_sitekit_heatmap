@@ -6,8 +6,9 @@
 	import { RADIUS, SIZE, frameBbox } from '$lib/viewport.js';
 	import { location } from '$lib/location.js';
 	import { heading, needsCompassPrompt, requestHeadingPermission } from '$lib/heading.js';
-	import { GRID_MODE } from '$lib/gridConfig.js';
-	import { apiSource, gridAttempt, gridEpoch } from '$lib/gridSource.js';
+	import { GRID_MODE, IS_UNITY } from '$lib/gridConfig.js';
+	import { apiSource, gridAttempt, gridEpoch, pushSource } from '$lib/gridSource.js';
+	import { gridDrawn, pushedGrid } from '$lib/gridPush.js';
 	import { embedInterventions, embedSessionId } from '$lib/embedPose.js';
 
 	let map = $state(null);
@@ -16,8 +17,14 @@
 	// and deliberate: gridSource keeps the request anchored until the visitor
 	// has walked far enough to need a new grid, so the *key* only changes when
 	// a fetch is actually warranted, and Heatmap gates on the key.
+	//
+	// With `?unity=1` the host pushes the grid and this is the one place that
+	// keeps the page from ever fetching: apiSource is never called, so neither
+	// movement nor interventions, sessionId, refreshGrid or a retry can reach
+	// the network. Until the first grid arrives there is simply no overlay.
 	let source = $derived.by(() => {
 		if (!$location || GRID_MODE === 'off') return null;
+		if (IS_UNITY) return $pushedGrid ? pushSource($pushedGrid) : null;
 		return apiSource([$location.lng, $location.lat], $gridEpoch, $gridAttempt, $embedInterventions, $embedSessionId);
 	});
 
@@ -62,7 +69,13 @@
 		<SiteMap mapStyle={customStyle} {bounds} onready={(m) => (map = m)} />
 	{/if}
 	{#if map && $location && source}
-		<Heatmap {map} {source} center={[$location.lng, $location.lat]} radius={RADIUS} />
+		<Heatmap
+			{map}
+			{source}
+			center={[$location.lng, $location.lat]}
+			radius={RADIUS}
+			onapplied={IS_UNITY ? gridDrawn : undefined}
+		/>
 	{/if}
 	{#if map && $location}
 		<LocationMarker {map} location={$location} heading={$heading} />

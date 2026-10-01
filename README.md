@@ -245,9 +245,10 @@ combining these with `lat`/`lng`/`heading`, and a full `postMessage` example.
 | `gridtype` | `PET` | `TEMPERATURE_CELSIUS`, `NOISE`, `CO2`, `HUMIDITY`, … — note only PET has a tuned colour ramp |
 | `gridradius` | `100` | fetch radius in metres, 60–300 |
 | `gridepoch` | `0` | bump to bypass every cache |
-| `gridorder` / `gridnorth` | `xy` / `top` | orientation override, see above |
+| `gridorder` / `gridnorth` | `yx` / `top` | orientation override, see above |
 | `interventions` | *(none)* | JSON array of EnvGrid interventions, see [Interventions and sessions](#interventions-and-sessions) |
 | `sessionId` | *(none)* | EnvGrid session id, see [Interventions and sessions](#interventions-and-sessions) |
+| `unity` | *(off)* | `1`: the host pushes the grid and the page never fetches one, see [Grid pushed by the Quest app](#grid-pushed-by-the-quest-app-unity1) |
 
 ### When there is no data
 
@@ -443,6 +444,58 @@ keep that in check:
 The camera uses `jumpTo` rather than an animated move for the same reason: an
 easing camera re-renders and re-requests tiles continuously, and with a live
 feed each move aborts the previous one mid-flight anyway.
+
+### Testing the embed without a real host
+
+[embed-test.html](embed-test.html) stands in for a Unity/Quest host: open it
+directly in a browser (it's a static file, not a route) alongside `npm run
+dev`, point it at the dev server's origin, and it drives the iframe over the
+same `postMessage` channel a real host would use — walking, turning in place,
+orbiting with GPS jitter, planting/clearing interventions, and applying a
+`sessionId` — while a status line reports position, heading, and how many
+messages have been posted. It's the fastest way to see [Keeping requests
+rare](#keeping-requests-rare) and [Interventions and
+sessions](#interventions-and-sessions) actually hold: e.g. confirming that
+walking triggers roughly one `/api/grid` request per 40 m, that turning in
+place triggers none, and that applying a `sessionId` stops position from
+triggering any at all.
+
+Tick **unity=1** before loading to play the Quest app's grid push instead
+(see below): *Push new grid* sends a synthetic grid around the current
+position (or a saved `/api/grid` response picked as the file), and the page's
+ack is shown next to the buttons.
+
+### Grid pushed by the Quest app (`unity=1`)
+
+With `?unity=1` the Unity/Quest app supplies the heatmap grid itself and the
+page **never requests one**: not on load, not while walking, and not for
+`interventions`, `sessionId`, `refreshGrid` or a retry. All of that becomes
+the host's job. Pose is unchanged. The host sends the EnvGrid response as-is:
+
+```js
+window.postMessage({ source: 'cf-temperature-grid', gridId: 7, ackTarget: 'Site Map WebView', t: Date.now(), grid: envGridResponse }, '*');
+```
+
+and the page acks each grid once it's on the map, through the TLab bridge the
+host's latency probe already uses:
+
+```js
+unitySendMessage('Site Map WebView', 'OnSiteMapGridApplied', '{"gridId":7,"ok":true,"deliveryMs":38,"buildMs":21,"drawMs":64}');
+```
+
+A re-send of an already drawn `gridId` is only re-acked, an older one is
+ignored, and an unusable grid is acked with `ok:false`. The host keeps
+re-sending its latest grid until the ack arrives, which covers grids posted
+before the page has started. The host fetches through this app's own
+[`/api/grid`](src/routes/api/grid/+server.js) proxy, which therefore is an
+interface of the Quest app now: keep its parameters and response stable.
+
+The full contract for the Unity developer, including C# reference code, is
+[docs/unity-grid-push.md](docs/unity-grid-push.md). The design and its
+reasoning are in [docs/unity-grid-push-plan.md](docs/unity-grid-push-plan.md).
+Code: [src/lib/gridPush.js](src/lib/gridPush.js) receives and acks,
+`pushSource` in [src/lib/gridSource.js](src/lib/gridSource.js) converts, and
+the gate is the `source` derivation in [src/routes/+page.svelte](src/routes/+page.svelte).
 
 ## Developing
 
