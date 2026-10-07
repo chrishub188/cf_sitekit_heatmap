@@ -40,8 +40,13 @@
 			bounds,
 			fitBoundsOptions: fit,
 			bearing,
-			maxPitch: 0
+			maxPitch: 0,
+			dragRotate: false, // right-drag / ctrl-drag
+			pitchWithRotate: false
 		});
+		// The site's bearing is set by us; users may pan and zoom but not rotate.
+		map.touchZoomRotate.disableRotation(); // two-finger twist, pinch-zoom stays
+		map.keyboard.disableRotation(); // shift + arrow keys
 		map.addControl(new maplibregl.ScaleControl({ maxWidth: 110, unit: 'metric' }), 'bottom-right');
 		ready = true;
 		onready?.(map);
