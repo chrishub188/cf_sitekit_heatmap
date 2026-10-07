@@ -62,7 +62,9 @@ export const PLANTING_INK = '#6F8A57';
 // the paper ground.
 export const PLANNING_BOUNDARY = '#5E554A'; // the 00 outline, dashed and unfilled
 export const PLANNING_RESTRICTION_COLORS = ['#7B5EA7', '#4A6A8A', '#B08A2E', '#A4487A', '#5C8C84', '#8A5A3C'];
-export const PLANNING_DESIGN = '#2F6B4F'; // the leftover design area
+// The leftover design area: dark grey with a faint fill, so it neither muddies
+// the heatmap or imagery nor reads like the green tree crowns.
+export const PLANNING_DESIGN = '#444444';
 // Dropped GeoJSON files, in drop order. Stronger than the planning colours so
 // an ad-hoc layer doesn't get lost among them, and kept off the heatmap's
 // default red–yellow–blue ramp.

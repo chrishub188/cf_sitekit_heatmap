@@ -43,11 +43,12 @@
 	let domain = $state(null);
 	// Hand-set colour scale limits. Null means "follow the data", and they
 	// deliberately survive a site or resolution switch so two datasets can be
-	// compared on one fixed scale.
+	// compared on one fixed scale. Starts pinned to a fixed PET range so every
+	// site and phase opens on the same colours; Auto releases it.
 	/** @type {number | null} */
-	let scaleMin = $state(null);
+	let scaleMin = $state(32);
 	/** @type {number | null} */
-	let scaleMax = $state(null);
+	let scaleMax = $state(45);
 	// Colour scheme picked from the legend, remembered in this browser so a
 	// reload keeps whatever is being tried out.
 	const SCHEME_KEY = 'heatmap-color-scheme';

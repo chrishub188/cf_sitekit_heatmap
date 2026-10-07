@@ -54,7 +54,7 @@ export function planningLayers(site) {
 			const group = /Entwurf/i.test(file) ? 'design' : 'restriction';
 			const style =
 				group === 'design'
-					? { color: PLANNING_DESIGN, fillOpacity: 0.3, lineWidth: 2.4, dashed: false }
+					? { color: PLANNING_DESIGN, fillOpacity: 0.1, lineWidth: 1.5, dashed: false }
 					: boundary
 						? { color: PLANNING_BOUNDARY, fillOpacity: 0, lineWidth: 1.6, dashed: true }
 						: {

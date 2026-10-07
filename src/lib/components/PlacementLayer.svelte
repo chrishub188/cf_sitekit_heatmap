@@ -112,7 +112,7 @@
 				source: ZONE_SOURCE,
 				filter: kind('zone'),
 				layout: { 'line-join': 'round' },
-				paint: { 'line-color': PLANNING_DESIGN, 'line-width': zoom(14, 1.5, 18, 3, 21, 4.5) }
+				paint: { 'line-color': PLANNING_DESIGN, 'line-width': zoom(14, 0.75, 18, 1.5, 21, 2.4) }
 			},
 			{
 				id: LAYER_GHOST_FILL,

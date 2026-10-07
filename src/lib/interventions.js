@@ -12,7 +12,7 @@ import { loadPlanningLayer, planningLayers } from '$lib/planning.js';
 export const INTERVENTION_TYPES = [
 	// icon: how large the crown is drawn in the palette, in px
 	{ id: 'TREE_SMALL', label: 'Small tree', radius: 3.25, icon: 22 },
-	{ id: 'TREE_LARGE', label: 'Large tree', radius: 15, icon: 34 }
+	{ id: 'TREE_LARGE', label: 'Large tree', radius: 7.5, icon: 34 }
 ];
 
 const byId = new Map(INTERVENTION_TYPES.map((t) => [t.id, t]));
