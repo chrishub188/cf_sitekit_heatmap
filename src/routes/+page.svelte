@@ -2,6 +2,7 @@
 	import SiteMap from '$lib/components/SiteMap.svelte';
 	import Heatmap from '$lib/components/Heatmap.svelte';
 	import LocationMarker from '$lib/components/LocationMarker.svelte';
+	import InterventionMarkers from '$lib/components/InterventionMarkers.svelte';
 	import { customStyle } from '$lib/style.js';
 	import { RADIUS, SIZE, frameBbox } from '$lib/viewport.js';
 	import { location } from '$lib/location.js';
@@ -10,6 +11,7 @@
 	import { apiSource, gridAttempt, gridEpoch, pushSource } from '$lib/gridSource.js';
 	import { gridDrawn, pushedGrid } from '$lib/gridPush.js';
 	import { embedInterventions, embedSessionId } from '$lib/embedPose.js';
+	import { MAX_INTERVENTIONS, parseInterventionMarker } from '$lib/intervention.js';
 
 	let map = $state(null);
 
@@ -26,6 +28,18 @@
 		if (!$location || GRID_MODE === 'off') return null;
 		if (IS_UNITY) return $pushedGrid ? pushSource($pushedGrid) : null;
 		return apiSource([$location.lng, $location.lat], $gridEpoch, $gridAttempt, $embedInterventions, $embedSessionId);
+	});
+
+	// Where interventions are placed. With `?unity=1` they come with the pushed
+	// grid (`grid.interventions`), so the markers change in the same moment as
+	// the recalculated heatmap; otherwise they're the list this page sends to
+	// the API itself. Nothing passed means no markers — there's no other gate.
+	// Bad elements are dropped one by one: this is display only, and a grid
+	// is never rejected over its markers.
+	let markers = $derived.by(() => {
+		const raw = IS_UNITY ? $pushedGrid?.grid?.interventions : $embedInterventions;
+		if (!Array.isArray(raw)) return [];
+		return raw.slice(0, MAX_INTERVENTIONS).map(parseInterventionMarker).filter((m) => m !== null);
 	});
 
 	// The camera frames a SIZE-metre crop around the visitor, set once on the
@@ -76,6 +90,9 @@
 			radius={RADIUS}
 			onapplied={IS_UNITY ? gridDrawn : undefined}
 		/>
+	{/if}
+	{#if map}
+		<InterventionMarkers {map} {markers} />
 	{/if}
 	{#if map && $location}
 		<LocationMarker {map} location={$location} heading={$heading} />

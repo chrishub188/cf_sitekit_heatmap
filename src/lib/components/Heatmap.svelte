@@ -82,7 +82,8 @@
 			map.addSource(SOURCE_ID, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
 		}
 		if (!map.getLayer(LAYER_ID)) {
-			const before = map.getLayer(beforeId) ? beforeId : undefined;
+			// Below the intervention markers too, if they got their layer in first.
+			const before = ['intervention-marker', beforeId].find((id) => map.getLayer(id));
 			map.addLayer(
 				{
 					id: LAYER_ID,

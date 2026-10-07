@@ -45,7 +45,7 @@ const ACK_METHOD = 'OnSiteMapGridApplied';
 /** Source keys of pushed grids are `${PUSH_KEY_PREFIX}${gridId}` — see gridSource.js's pushSource. */
 export const PUSH_KEY_PREFIX = 'push|';
 
-/** @typedef {{centerCoordinate: {latitude: number, longitude: number}, radiusInMeters: number, gridData: (number|null)[][], sessionId?: string, gridType?: string}} EnvGridResponse */
+/** @typedef {{centerCoordinate: {latitude: number, longitude: number}, radiusInMeters: number, gridData: (number|null)[][], sessionId?: string, gridType?: string, interventions?: unknown[]}} EnvGridResponse */
 
 /** The newest accepted grid, or null until the host has pushed one. @type {import('svelte/store').Writable<{gridId: number, grid: EnvGridResponse} | null>} */
 export const pushedGrid = writable(null);

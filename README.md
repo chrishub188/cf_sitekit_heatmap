@@ -486,9 +486,15 @@ unitySendMessage('Site Map WebView', 'OnSiteMapGridApplied', '{"gridId":7,"ok":t
 A re-send of an already drawn `gridId` is only re-acked, an older one is
 ignored, and an unusable grid is acked with `ok:false`. The host keeps
 re-sending its latest grid until the ack arrives, which covers grids posted
-before the page has started. The host fetches through this app's own
-[`/api/grid`](src/routes/api/grid/+server.js) proxy, which therefore is an
-interface of the Quest app now: keep its parameters and response stable.
+before the page has started. How the host obtains its grids is
+up to the host and not part of this app.
+
+The grid may carry an optional `interventions` list,
+`[{objectId, type, coord: {lat, lon}, orientation, new}, …]`. Each one is
+drawn as a tree symbol (lobed crown outline of 3.25 m radius) on top of the heatmap, swapped in with
+the grid that carries it; without the list no markers are shown. Outside
+unity mode the same rings mark the `interventions` this page sends to the API.
+Code: [src/lib/components/InterventionMarkers.svelte](src/lib/components/InterventionMarkers.svelte).
 
 The full contract for the Unity developer, including C# reference code, is
 [docs/unity-grid-push.md](docs/unity-grid-push.md). The design and its

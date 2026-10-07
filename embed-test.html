@@ -4,7 +4,7 @@
 <body>
 <div class="panel">
 	<div class="row">
-		<label>origin <input id="origin" size="26" value="http://localhost:5173"></label>
+		<label>origin <input id="origin" size="26" value="http://localhost:5174"></label>
 		<label>site
 			<select id="site">
 				<option value="dalbergplatz">Dalbergplatz</option>
@@ -364,7 +364,15 @@
 			centerCoordinate: { latitude: lat, longitude: lng },
 			radiusInMeters: r,
 			gridType: 'PET',
-			gridData
+			gridData,
+			// The planted list, in the shape the Quest app sends — drawn as markers.
+			interventions: interventions.map((iv) => ({
+				objectId: null,
+				type: iv.interventionType,
+				coord: { lat: iv.gpsCoordinate.latitude, lon: iv.gpsCoordinate.longitude },
+				orientation: 0,
+				new: iv.isNew
+			}))
 		};
 	}
 

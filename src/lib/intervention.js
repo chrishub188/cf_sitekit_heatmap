@@ -48,6 +48,37 @@ export function parseIntervention(obj) {
 	return clean;
 }
 
+/** @typedef {{lng: number, lat: number, type: string, isNew: boolean, orientation: number}} InterventionMarker */
+
+/**
+ * Where to draw one intervention marker, or null if `obj` doesn't say.
+ *
+ * Unlike parseIntervention this is display-only — nothing is computed from
+ * it — so it's lenient: it reads the shape the Quest app puts on a pushed
+ * grid (`{objectId, type, coord: {lat, lon}, orientation, new}`, objectId
+ * possibly null) as well as the EnvGrid shape above, and only insists on a
+ * usable coordinate. Callers drop the nulls rather than rejecting the list.
+ * @param {unknown} obj
+ * @returns {InterventionMarker | null}
+ */
+export function parseInterventionMarker(obj) {
+	if (!obj || typeof obj !== 'object') return null;
+	const o = /** @type {Record<string, any>} */ (obj);
+	const lat = o.coord?.lat ?? o.gpsCoordinate?.latitude;
+	const lng = o.coord?.lon ?? o.gpsCoordinate?.longitude;
+	if (typeof lat !== 'number' || !Number.isFinite(lat) || lat < -90 || lat > 90) return null;
+	if (typeof lng !== 'number' || !Number.isFinite(lng) || lng < -180 || lng > 180) return null;
+	const type = o.type ?? o.interventionType;
+	const orientation = o.orientation ?? o.orientationDegree;
+	return {
+		lng,
+		lat,
+		type: typeof type === 'string' ? type : '',
+		isNew: (o.new ?? o.isNew) === true,
+		orientation: typeof orientation === 'number' && Number.isFinite(orientation) ? orientation : 0
+	};
+}
+
 /** Cap on how many interventions a single request may carry — the array
  * round-trips into a query string sent upstream, so it's worth an explicit
  * bound the same way MIN_RADIUS_M/MAX_RADIUS_M bound the radius. */
