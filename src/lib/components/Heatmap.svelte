@@ -148,7 +148,11 @@
 			// isStyleLoaded() can flicker back to false later (e.g. while new tiles
 			// stream in as the camera moves) — 'load' only ever fires once, so once
 			// the layer exists we know the style loaded and can skip that flaky gate.
-			if (map.getLayer(LAYER_ID) || map.isStyleLoaded()) apply();
+			// Before our first apply there is no layer of ours yet, so a static
+			// style layer stands in (same check as +page.svelte's camera follow):
+			// a first grid landing after 'load' while tiles stream would otherwise
+			// wait on a 'load' that never comes again.
+			if (map.getLayer(LAYER_ID) || map.getLayer('street-label') || map.isStyleLoaded()) apply();
 			else map.once('load', apply);
 		} finally {
 			building = false;

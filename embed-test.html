@@ -4,7 +4,7 @@
 <body>
 <div class="panel">
 	<div class="row">
-		<label>origin <input id="origin" size="26" value="http://localhost:5174"></label>
+		<label>origin <input id="origin" size="26" value="http://localhost:5173"></label>
 		<label>site
 			<select id="site">
 				<option value="dalbergplatz">Dalbergplatz</option>
@@ -82,7 +82,7 @@
 	</p>
 	<p class="hint">
 		<strong>unity=1</strong> stands in for the Quest app pushing the grid (see
-		<code>docs/unity-grid-push.md</code>). Expect <strong>no</strong> <code>/api/grid</code>
+		the README, <em>Grid pushed by the Quest app</em>). Expect <strong>no</strong> <code>/api/grid</code>
 		request at all — not on load, walking, interventions or refreshGrid — and no overlay
 		until a grid is pushed. Each push shows the page's ack: a new id draws and acks once
 		with timings, a re-send of the same id only re-acks, an older id gets no answer, and
@@ -331,7 +331,8 @@
 
 	// --- grid push (unity=1) ------------------------------------------------
 	//
-	// Plays the Quest app's part of docs/unity-grid-push.md: one postMessage per
+	// Plays the Quest app's part of the grid push (README, "Grid pushed by the
+	// Quest app"): one postMessage per
 	// grid, tagged 'cf-temperature-grid', carrying the EnvGrid response as-is.
 	// The page acks through the TLab bridge; with no bridge in a desktop browser
 	// it posts the ack to its parent instead, which is what's shown here.

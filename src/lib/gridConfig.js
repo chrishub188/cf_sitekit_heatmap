@@ -82,6 +82,6 @@ export const GRID_NORTH = /** @type {'top' | 'bottom'} */ (oneOf('gridnorth', ['
  * True when the Unity/Quest host supplies the grid itself (`?unity=1`): the
  * page then never requests one and only draws what gridPush.js receives. The
  * host owns every reason to fetch — interventions, sessions, walking out of
- * the grid, retries — see docs/unity-grid-push.md.
+ * the grid, retries — see README.md, "Grid pushed by the Quest app".
  */
 export const IS_UNITY = params.get('unity') === '1';

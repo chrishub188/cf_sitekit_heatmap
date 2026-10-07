@@ -9,6 +9,8 @@
 //       '*'
 //   );
 //
+// `id` is optional and orders pose only — see lastPoseId below.
+//
 // Updates arrive at roughly 5 Hz, which is why this module exists at all:
 // there is exactly ONE `message` listener, registered at import time rather
 // than per store subscription, and it does nothing but write to two stores.
@@ -125,18 +127,26 @@ export const embedInterventions = writable(initialInterventions);
 /** Latest host-supplied EnvGrid session id, or null. */
 export const embedSessionId = writable(initialSessionId);
 
-// Messages can arrive out of order; `id`, when the host sends one, is a
-// monotonic counter, so anything older than what we've already applied is a
-// straggler and gets dropped.
-let lastId = -Infinity;
+// Pose messages can arrive out of order; `id`, when the host sends one, is a
+// monotonic counter, so a pose older than the last one applied is a straggler
+// and gets dropped. It orders pose only: the host counts poses on their own,
+// and an `interventions` or `refreshGrid` message carrying an id from another
+// counter (or none) must neither be dropped by it nor push it ahead of the
+// poses. Those fields are state the host re-sends whole, not a stream.
+let lastPoseId = -Infinity;
 
 function handleMessage(/** @type {MessageEvent} */ event) {
 	const data = event.data;
 	if (!data || data.source !== MESSAGE_SOURCE) return;
 
-	if (typeof data.id === 'number') {
-		if (data.id < lastId) return;
-		lastId = data.id;
+	// Number.isFinite rather than typeof: a C# host formats NaN and Infinity as
+	// valid JS literals, and a NaN heading or position would break the marker.
+	const hasHeading = Number.isFinite(data.heading);
+	const hasPosition = Number.isFinite(data.lat) && Number.isFinite(data.lng);
+	let poseIsCurrent = true;
+	if ((hasHeading || hasPosition) && typeof data.id === 'number') {
+		if (data.id < lastPoseId) poseIsCurrent = false;
+		else lastPoseId = data.id;
 	}
 
 	// Not pose: the host telling us the modelled world changed. Handled
@@ -145,7 +155,7 @@ function handleMessage(/** @type {MessageEvent} */ event) {
 
 	// Heading first, and never deferred: it's a single number going into a
 	// store, and any delay here is delay the visitor sees when they turn.
-	if (hasHeadingParam && typeof data.heading === 'number') {
+	if (hasHeadingParam && hasHeading && poseIsCurrent) {
 		embedHeading.set(normalizeHeading(data.heading));
 	}
 
@@ -170,7 +180,7 @@ function handleMessage(/** @type {MessageEvent} */ event) {
 	// gate drops updates by whether the visitor actually moved rather than by
 	// how much time passed, which caps the rate at walking pace however fast a
 	// host posts, and costs nothing at all while they stand still.
-	if (isEmbedded && typeof data.lat === 'number' && typeof data.lng === 'number') {
+	if (isEmbedded && hasPosition && poseIsCurrent) {
 		embedLocation.set({ lat: data.lat, lng: data.lng });
 	}
 }

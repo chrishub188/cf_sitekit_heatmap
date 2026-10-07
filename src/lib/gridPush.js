@@ -10,7 +10,7 @@
 //
 // where `grid` is the EnvGrid API response exactly as the service returned
 // it, so gridToColumns in envGrid.js reads it unchanged. The full contract,
-// written for the Unity developer, is docs/unity-grid-push.md.
+// written for the Unity developer, is kept outside the repo.
 //
 // A grid is sent once, unlike pose, so it can be lost — posted before this
 // module's listener exists, or into a page that has since reloaded. The host

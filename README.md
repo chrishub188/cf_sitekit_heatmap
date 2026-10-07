@@ -347,7 +347,9 @@ side of both lives in [src/lib/embedPose.js](src/lib/embedPose.js): one
     `source: 'cf-temperature-map'` so unrelated `message` events are
     ignored; the sender's origin is intentionally not validated. An optional
     numeric `id` field, if the host sends one, is treated as a monotonic
-    counter and used to drop out-of-order messages. If updates stop arriving,
+    counter and used to drop out-of-order poses. It orders `lat`/`lng`/
+    `heading` only: `interventions`, `sessionId` and `refreshGrid` are always
+    applied, whatever `id` they carry. If updates stop arriving,
     the marker/heatmap simply freeze at the last known value.
 
 ### Example iframe embeds
@@ -467,6 +469,11 @@ ack is shown next to the buttons.
 
 ### Grid pushed by the Quest app (`unity=1`)
 
+Not in use yet: injecting the ~200 KB grid JSON through the WebView causes
+problems on the Quest, so the Quest app currently loads the page without
+`unity=1` and sends pose, `interventions` and `refreshGrid` instead, letting
+the page fetch the grid itself.
+
 With `?unity=1` the Unity/Quest app supplies the heatmap grid itself and the
 page **never requests one**: not on load, not while walking, and not for
 `interventions`, `sessionId`, `refreshGrid` or a retry. All of that becomes
@@ -496,9 +503,6 @@ the grid that carries it; without the list no markers are shown. Outside
 unity mode the same rings mark the `interventions` this page sends to the API.
 Code: [src/lib/components/InterventionMarkers.svelte](src/lib/components/InterventionMarkers.svelte).
 
-The full contract for the Unity developer, including C# reference code, is
-[docs/unity-grid-push.md](docs/unity-grid-push.md). The design and its
-reasoning are in [docs/unity-grid-push-plan.md](docs/unity-grid-push-plan.md).
 Code: [src/lib/gridPush.js](src/lib/gridPush.js) receives and acks,
 `pushSource` in [src/lib/gridSource.js](src/lib/gridSource.js) converts, and
 the gate is the `source` derivation in [src/routes/+page.svelte](src/routes/+page.svelte).
