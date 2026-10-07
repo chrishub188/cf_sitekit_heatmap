@@ -7,6 +7,7 @@
 		name = null, // filename of the loaded log
 		count = 0, // interventions parsed
 		shown = 0, // how many survived the active clip shape
+		placed = 0, // trees placed by hand on the site on screen; brings the mode switch without a log
 		entries = 0, // records in the log; only worth showing when there's more than one
 		error = null, // parse or read failure; replaces the controls
 		simulation = null, // 'loading' | 'ready' | 'error' — the recalculated heatmap for the site on screen
@@ -43,7 +44,7 @@
 <div class="row">
 	{#if error}
 		<p class="error">{error}</p>
-	{:else if name}
+	{:else if name || placed}
 		<SegmentedSwitch options={OVERLAY_MODES} active={mode} onselect={onmode} />
 		{#if SIMULATION_LABELS[simulation]}
 			<span
@@ -52,7 +53,12 @@
 				title={simulation === 'error' ? simulationError : null}>{SIMULATION_LABELS[simulation]}</span
 			>
 		{/if}
-		<span class="meta" title={details}>{shown < count ? `${tally} · ` : ''}{name}</span>
+		{#if name}
+			<span class="meta" title={details}>{shown < count ? `${tally} · ` : ''}{name}</span>
+		{:else}
+			<!-- Placed trees only: a log can still be loaded on top of them. -->
+			<button class="load" onclick={() => picker.click()}>+ Logfile</button>
+		{/if}
 	{:else}
 		<!-- No log yet: the row is the affordance, since drag and drop alone
 		     leaves nothing to discover. -->

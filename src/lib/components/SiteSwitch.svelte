@@ -11,10 +11,8 @@
 </nav>
 
 <style>
+	/* Placed by the page's top-left column, with the intervention tray under it. */
 	nav {
-		position: absolute;
-		top: 1rem;
-		left: 1rem;
 		display: flex;
 		gap: 1px;
 		padding: 1px;

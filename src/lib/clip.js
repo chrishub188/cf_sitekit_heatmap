@@ -24,6 +24,19 @@ export function pointInPolygon(x, y, rings) {
 	return !rings.slice(1).some((hole) => pointInRing(x, y, hole));
 }
 
+// True when the point lies in any Polygon or MultiPolygon among `features`
+// (lon/lat, as toLonLatFeatures returns them). Other geometries never match.
+/** @param {number} x @param {number} y @param {any[]} features */
+export function pointInFeatures(x, y, features) {
+	return features.some(({ geometry }) => {
+		if (geometry?.type === 'Polygon') return pointInPolygon(x, y, geometry.coordinates);
+		if (geometry?.type === 'MultiPolygon') {
+			return geometry.coordinates.some((/** @type {number[][][]} */ rings) => pointInPolygon(x, y, rings));
+		}
+		return false;
+	});
+}
+
 // Predicate for one clip shape. Takes lon/lat explicitly rather than a row
 // object, so callers with their own point shape can use it directly.
 /**

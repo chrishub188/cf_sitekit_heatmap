@@ -1,5 +1,5 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import SiteMap from '$lib/components/SiteMap.svelte';
 	import SiteSwitch from '$lib/components/SiteSwitch.svelte';
 	import HeatmapToggle from '$lib/components/HeatmapToggle.svelte';
@@ -12,6 +12,8 @@
 	import PlanningPanel from '$lib/components/PlanningPanel.svelte';
 	import LogDropZone from '$lib/components/LogDropZone.svelte';
 	import LogRow from '$lib/components/LogRow.svelte';
+	import InterventionPalette from '$lib/components/InterventionPalette.svelte';
+	import PlacementLayer from '$lib/components/PlacementLayer.svelte';
 	import Legend from '$lib/components/Legend.svelte';
 	import AiWatermark from '$lib/components/AiWatermark.svelte';
 	import RecenterButton from '$lib/components/RecenterButton.svelte';
@@ -82,8 +84,11 @@
 	// The site on screen's baseline grid, fetched from the backend. Raw state: a
 	// 300 m grid is 90k values, far too many to wrap in reactive proxies.
 	let baseline = $state.raw(/** @type {(GridState & { site: number }) | null} */ (null));
-	// The log's site rerun with its trees in place.
-	let simulation = $state.raw(/** @type {GridState | null} */ (null));
+	// The site on screen rerun with its trees in place: the log's, if it belongs
+	// to this site, plus any placed by hand. While a newer rerun is loading it
+	// keeps the previous grid, so 'After' doesn't blink back to the baseline on
+	// every drop.
+	let simulation = $state.raw(/** @type {(GridState & { site: number }) | null} */ (null));
 	// The site's own 5 m model run (see localgrid.js), loaded only while 5 m is
 	// on screen. Raw for the same reason as the baseline.
 	/** @typedef {{ site: number, status: 'loading' | 'ready' | 'error', data: import('$lib/localgrid.js').GridRows | null, message: string | null }} LocalGridState */
@@ -93,7 +98,24 @@
 	let mode = $state('heatmap');
 	let phase = $state('after'); // 'before' | 'after' — which grid the heatmap draws for the log's site
 	let shownTrees = $state(0); // crowns left after the active clip shape, reported by the overlay
-	const interventions = $derived(log?.interventions ?? []);
+	// Trees dragged onto the map from the palette, per site index, each list
+	// replaced on every change. They sit on top of a loaded log rather than
+	// replacing it, and survive clearing it. `history` holds each site's earlier
+	// lists, newest last, for Undo.
+	/** @typedef {import('$lib/logfile.js').Intervention & { id: string, manual: true }} PlacedTree */
+	let placed = $state.raw(/** @type {Record<number, PlacedTree[]>} */ ({}));
+	let history = $state.raw(/** @type {Record<number, PlacedTree[][]>} */ ({}));
+	let nextTreeId = 0;
+	/** @type {PlacementLayer | null} */
+	let placement = $state(null);
+	let removingTree = $state(false); // a placed tree is held; the palette shows itself as a bin
+	// Off hides the crowns over the heatmap without removing any tree, for
+	// reading the recalculated grid unobstructed. The Trees view ignores it.
+	let showTrees = $state(true);
+	const placedHere = $derived(placed[active] ?? []);
+	// Every log tree goes in, not just this site's: the overlay's clip keeps
+	// other sites' trees off the map, and its count feeds the "n of m" tally.
+	const interventions = $derived([...(log?.interventions ?? []), ...placedHere]);
 	// Planning layers switched on. Ids carry the site folder, so each site keeps
 	// its own selection across tab switches. Replaced, not mutated, on a toggle.
 	let planning = $state(/** @type {Set<string>} */ (new Set()));
@@ -136,9 +158,13 @@
 	// Set by the map's one 'load' event. `isStyleLoaded()` can't stand in for it:
 	// it drops back to false whenever tiles are loading.
 	let styleReady = $state(false);
+	// Only the site's own state's imagery is switched on. Both services' extents
+	// cover every site, so with both on, MapLibre would credit a state whose
+	// imagery isn't on screen (it credits every source with a visible layer).
 	$effect(() => {
-		const visibility = basemap === 'satellite' ? 'visible' : 'none';
-		if (styleReady && map) for (const id of SATELLITE_LAYERS) map.setLayoutProperty(id, 'visibility', visibility);
+		const shown = basemap === 'satellite' ? site.imagery : null;
+		if (!styleReady || !map) return;
+		for (const id of SATELLITE_LAYERS) map.setLayoutProperty(id, 'visibility', id === shown ? 'visible' : 'none');
 	});
 
 	/** @param {string} id @param {boolean} on */
@@ -198,11 +224,9 @@
 			? plazaBounds.bounds
 			: viewBounds
 	);
-	// Only the log's own site swaps in the recalculated grid; the other tabs, and
-	// this one until the backend answers, keep showing the baseline.
-	const simulated = $derived(
-		log?.site === active && simulation?.status === 'ready' ? simulation.grid : null
-	);
+	// Only a rerun for the site on screen swaps in; until the backend answers the
+	// first one, the baseline stays.
+	const simulated = $derived(simulation?.site === active ? simulation.grid : null);
 	const baseGrid = $derived(
 		baseline?.site === active && baseline.status === 'ready' ? baseline.grid : null
 	);
@@ -219,9 +243,9 @@
 		local ? (localCells ? null : (localGrid?.status ?? null)) : grid ? null : (baseline?.status ?? null)
 	);
 	const heatMessage = $derived(local ? (localGrid?.message ?? null) : (baseline?.message ?? null));
-	// Before/After only means something on the log's own site, once a rerun has
-	// been requested; 'After' stays greyed out until the backend answers.
-	const comparable = $derived(mode === 'heatmap' && log?.site === active && simulation != null);
+	// Before/After only means something once a rerun has been requested for the
+	// site on screen; 'After' stays greyed out until the backend answers.
+	const comparable = $derived(mode === 'heatmap' && simulation?.site === active);
 	// Trees are only ever rerun at 1 m, so at 5 m there is no modelled 'After'
 	// to show — only the 5 m baseline.
 	const phaseOptions = $derived(
@@ -300,42 +324,114 @@
 		};
 	});
 
-	// One request per loaded log, cancelled if the log is cleared or replaced
-	// before the backend answers.
+	// What the site on screen is rerun with: the log's trees if the log belongs
+	// here, then the ones placed by hand, in the shape the backend takes. The
+	// grid spans the full crop, so only trees inside it can affect it.
+	const simulatedTrees = $derived.by(() => {
+		const inGrid = clipTest('full', { bounds: site.fullBounds });
+		return [...(log?.site === active ? log.interventions : []), ...placedHere]
+			.filter((t) => !inGrid || inGrid(t.lon, t.lat))
+			.map(({ type, lat, lon, isNew }) => ({ type, lat, lon, isNew }));
+	});
+
+	// A rerun takes seconds and opens a backend session, so a burst of drops
+	// waits for a pause before asking, and a grid already computed for the same
+	// trees (a tab switch away and back, an undo) is reused. Kept small: each
+	// grid is 90k values.
+	const SIMULATION_DEBOUNCE_MS = 800;
+	const SIMULATION_CACHE_SIZE = 8;
+	/** @type {Map<string, import('$lib/envgrid.js').EnvGrid>} */
+	const simulationCache = new Map();
+
+	// Cancelled if the trees change again before the backend answers.
 	$effect(() => {
-		if (!log) {
-			simulation = null;
-			return;
-		}
-		const logSite = SITES[log.site];
-		// The grid spans the full crop, so only trees inside it can affect it.
-		const inGrid = clipTest('full', { bounds: logSite.fullBounds });
-		const trees = log.interventions.filter((t) => !inGrid || inGrid(t.lon, t.lat));
+		const index = active;
+		const trees = simulatedTrees;
 		if (trees.length === 0) {
 			simulation = null;
 			return;
 		}
+		const key = `${SITES[index].id}:${JSON.stringify(trees)}`;
+		const cached = simulationCache.get(key);
+		if (cached) {
+			simulation = { site: index, status: 'ready', grid: cached, message: null };
+			return;
+		}
 
+		const previous = untrack(() => (simulation?.site === index ? simulation.grid : null));
+		simulation = { site: index, status: 'loading', grid: previous, message: null };
 		const controller = new AbortController();
-		simulation = { status: 'loading', grid: null, message: null };
-		requestEnvGrid(
-			{
-				center: [logSite.center[0], logSite.center[1]],
-				radius: SIMULATION_RADIUS,
-				gridType: 'PET',
-				interventions: trees.map(({ type, lat, lon, isNew }) => ({ type, lat, lon, isNew }))
-			},
-			controller.signal
-		)
-			.then((grid) => {
-				simulation = { status: 'ready', grid, message: null };
-			})
-			.catch((err) => {
-				if (controller.signal.aborted) return;
-				console.warn('simulation failed', err);
-				simulation = { status: 'error', grid: null, message: err instanceof Error ? err.message : String(err) };
-			});
-		return () => controller.abort();
+		const timer = setTimeout(() => {
+			const center = SITES[index].center;
+			requestEnvGrid(
+				{ center: [center[0], center[1]], radius: SIMULATION_RADIUS, gridType: 'PET', interventions: trees },
+				controller.signal
+			)
+				.then((grid) => {
+					simulationCache.set(key, grid);
+					if (simulationCache.size > SIMULATION_CACHE_SIZE) {
+						simulationCache.delete(simulationCache.keys().next().value ?? '');
+					}
+					simulation = { site: index, status: 'ready', grid, message: null };
+				})
+				.catch((err) => {
+					if (controller.signal.aborted) return;
+					console.warn('simulation failed', err);
+					const message = err instanceof Error ? err.message : String(err);
+					simulation = { site: index, status: 'error', grid: null, message };
+				});
+		}, SIMULATION_DEBOUNCE_MS);
+		return () => {
+			clearTimeout(timer);
+			controller.abort();
+		};
+	});
+
+	// --- trees placed by hand ----------------------------------------------
+	/** @param {PlacedTree[]} next */
+	function setPlaced(next) {
+		history = { ...history, [active]: [...(history[active] ?? []), placedHere] };
+		placed = { ...placed, [active]: next };
+	}
+
+	/** @param {string} type @param {{ lon: number, lat: number }} at */
+	function placeTree(type, { lon, lat }) {
+		/** @type {PlacedTree} */
+		const tree = {
+			id: `placed-${nextTreeId++}`,
+			type,
+			lat,
+			lon,
+			isNew: true,
+			objectId: null,
+			orientation: 0,
+			manual: true
+		};
+		setPlaced([...placedHere, tree]);
+		phase = 'after'; // show the effect as soon as it's computed
+		showTrees = true; // a tree dropped while they're hidden would vanish on landing
+	}
+
+	/** @param {string} id @param {{ lon: number, lat: number }} at */
+	function moveTree(id, { lon, lat }) {
+		setPlaced(placedHere.map((t) => (t.id === id ? { ...t, lon, lat } : t)));
+	}
+
+	/** @param {string} id */
+	function removeTree(id) {
+		setPlaced(placedHere.filter((t) => t.id !== id));
+	}
+
+	function undoPlacement() {
+		const steps = history[active] ?? [];
+		if (steps.length === 0) return;
+		placed = { ...placed, [active]: steps[steps.length - 1] };
+		history = { ...history, [active]: steps.slice(0, -1) };
+	}
+
+	// The Trees view has nothing to show once the last tree is gone.
+	$effect(() => {
+		if (mode === 'trees' && !log && placedHere.length === 0) mode = 'heatmap';
 	});
 
 	// One place to land in: a rejected file never leaves a half-loaded log behind.
@@ -516,14 +612,40 @@
 				center={site.center}
 				radius={RADIUS}
 				{clipShape}
-				visible={mode === 'trees'}
+				visible={mode === 'trees' ||
+					(placedHere.length > 0 && showTrees && !(comparable && phase === 'before'))}
+				filled={mode === 'trees' || !showHeatmap}
 				onshown={(n) => (shownTrees = n)}
 			/>
 		{/if}
+		<AiWatermark {map} />
+		<PlacementLayer
+			bind:this={placement}
+			bind:removing={removingTree}
+			{map}
+			{site}
+			onplace={placeTree}
+			onmove={moveTree}
+			onremove={removeTree}
+		/>
 	{/if}
-	<AiWatermark />
 	<LogDropZone onfile={loadFile} onerror={reportError} />
-	<SiteSwitch sites={SITES} {active} onselect={(i) => (active = i)} />
+	<div class="top-left">
+		<SiteSwitch sites={SITES} {active} onselect={(i) => (active = i)} />
+	</div>
+	<div class="right-edge">
+		<InterventionPalette
+			count={placedHere.length}
+			canUndo={(history[active]?.length ?? 0) > 0}
+			removing={removingTree}
+			treesShown={showTrees}
+			ontoggletrees={() => (showTrees = !showTrees)}
+			onpick={(/** @type {string} */ type, /** @type {PointerEvent} */ e) =>
+				placement?.begin(type, e.clientX, e.clientY)}
+			onundo={undoPlacement}
+			onclear={() => setPlaced([])}
+		/>
+	</div>
 	<div class="top-right">
 		<ControlPanel>
 			<div class="row">
@@ -592,9 +714,10 @@
 				name={log?.name ?? null}
 				count={interventions.length}
 				shown={shownTrees}
+				placed={placedHere.length}
 				entries={log?.entries.length ?? 0}
 				error={logError}
-				simulation={log?.site === active ? (simulation?.status ?? null) : null}
+				simulation={simulation?.site === active ? simulation.status : null}
 				simulationError={simulation?.message ?? null}
 				{mode}
 				onmode={(m) => (mode = m)}
@@ -626,6 +749,24 @@
 		flex-direction: column;
 		gap: 0.4rem;
 		width: fit-content;
+	}
+
+	/* Top left: the site tabs. */
+	.top-left {
+		position: absolute;
+		top: 1rem;
+		left: 1rem;
+	}
+
+	/* The intervention tray, centred on the right edge between the top-right
+	   panel and the scale bar. Above the map's own controls so a drag back onto
+	   it lands on the tray. */
+	.right-edge {
+		position: absolute;
+		top: 50%;
+		right: 1rem;
+		z-index: 2;
+		transform: translateY(-50%);
 	}
 
 	/* Top right: one panel framed like the bottom-left one. Heatmap on/off next
@@ -679,6 +820,80 @@
 		margin-left: auto;
 		padding-left: 0.2rem;
 		border-left: 1px solid #cdc1a9;
+	}
+
+	/* Bottom right: the AI label, the scale bar and the map credits, stacked by
+	   MapLibre in that order. All three get the app's paper and hairline, the
+	   same 1rem inset as every other corner and the same gap as the bottom-left
+	   stack, so the corner reads as one column rather than library defaults. */
+	.stage :global(.maplibregl-ctrl-bottom-right .maplibregl-ctrl) {
+		margin: 0 1rem 0.4rem 0;
+	}
+
+	.stage :global(.maplibregl-ctrl-bottom-right .maplibregl-ctrl:last-child) {
+		margin-bottom: 1rem;
+	}
+
+	.stage :global(.maplibregl-ctrl-scale),
+	.stage :global(.maplibregl-ctrl-attrib) {
+		font: 400 0.62rem/1.2 ui-sans-serif, system-ui, sans-serif;
+		letter-spacing: 0.09em;
+		color: #9a9081;
+		background: rgb(241 235 223 / 0.85);
+	}
+
+	/* Still a bracket, since that's what makes it read as a length, but drawn in
+	   the panels' ink instead of black. */
+	.stage :global(.maplibregl-ctrl-scale) {
+		padding: 0.15rem 0.45rem;
+		border-width: 0 1.5px 1.5px;
+		border-color: #9a9081;
+	}
+
+	/* A pill like the AI label above it. A fixed radius rather than 999px, so
+	   the satellite credits keep tidy corners when they wrap to two lines. */
+	.stage :global(.maplibregl-ctrl-attrib) {
+		display: flex;
+		align-items: center;
+		box-sizing: border-box;
+		min-height: 1.5rem;
+		border: 1px solid #cdc1a9;
+		border-radius: 0.8rem;
+	}
+
+	.stage :global(.maplibregl-ctrl-attrib a) {
+		color: inherit;
+	}
+
+	.stage :global(.maplibregl-ctrl-attrib a:hover) {
+		color: #6f665a;
+	}
+
+	/* The (i) toggle, redrawn to match the AI label's mark: a 0.9rem disc in
+	   the panels' ink with the glyph knocked out in paper, centred in the pill.
+	   MapLibre's own is a black icon on a white disc with a blue focus ring. */
+	.stage :global(.maplibregl-ctrl-attrib-button) {
+		top: 50%;
+		right: 0.15rem;
+		background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='10' fill='%239a9081'/%3E%3Cpath d='M9 6a1 1 0 1 0 2 0 1 1 0 1 0-2 0m0 3a1 1 0 1 1 2 0v5a1 1 0 1 1-2 0z' fill='%23f1ebdf'/%3E%3C/svg%3E")
+			center / 0.9rem no-repeat;
+		transform: translateY(-50%);
+	}
+
+	.stage :global(.maplibregl-ctrl-attrib.maplibregl-compact-show .maplibregl-ctrl-attrib-button) {
+		background-color: transparent;
+	}
+
+	.stage :global(.maplibregl-ctrl-attrib-button:hover) {
+		filter: brightness(0.8);
+	}
+
+	.stage :global(.maplibregl-ctrl-attrib-button:focus) {
+		box-shadow: none;
+	}
+
+	.stage :global(.maplibregl-ctrl-attrib-button:focus-visible) {
+		box-shadow: 0 0 0 1.5px #9a9081;
 	}
 
 	/* The imagery credits make the attribution long: give it all the width

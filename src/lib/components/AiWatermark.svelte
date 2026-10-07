@@ -1,11 +1,30 @@
 <script>
-	let { label = 'AI generated' } = $props();
+	import { onMount } from 'svelte';
+
+	let {
+		map, // maplibre Map instance; the label joins its bottom-right controls
+		label = 'AI generated'
+	} = $props();
+
+	/** @type {HTMLDivElement} */
+	let el;
+
+	// Registered as a MapLibre control so it stacks with the scale bar and the
+	// credits in the bottom-right corner rather than being placed by hand over
+	// them: their heights change with the zoom and the attribution's width.
+	onMount(() => {
+		const control = {
+			onAdd: () => el,
+			onRemove: () => el.remove()
+		};
+		map.addControl(control, 'bottom-right');
+		return () => {
+			if (map.hasControl(control)) map.removeControl(control);
+		};
+	});
 </script>
 
-<!-- Turned on its side and floated against the right edge, where nothing else
-     lives: the corners already hold the site tabs, resolution switch, control
-     panel and map credits. -->
-<div class="watermark" aria-label={label}>
+<div bind:this={el} class="watermark maplibregl-ctrl" aria-label={label}>
 	<span class="mark">
 		<!-- A four-point sparkle, the common shorthand for "AI". -->
 		<svg viewBox="0 0 24 24" aria-hidden="true">
@@ -16,22 +35,19 @@
 </div>
 
 <style>
-	/* writing-mode, not a rotate transform, so the box keeps its real rotated
-	   size and right: 1rem means the same inset as the resolution switch above.
-	   The extra 180° turn makes the text read bottom-to-top. */
+	/* The same pill as the map credits below it (see the page's bottom-right
+	   rules): height, border, lettering and an ink disc for the icon, mirrored
+	   to the left where the credits have their (i) on the right. */
 	.watermark {
-		position: absolute;
-		top: 50%;
-		right: 1rem;
 		display: flex;
 		align-items: center;
-		gap: 0.4rem;
-		padding-block: 0.2rem;
-		padding-inline: 0.2rem 0.65rem; /* snug around the mark, roomier after the text */
+		gap: 0.35rem;
+		box-sizing: border-box;
+		width: fit-content;
+		min-height: 1.5rem;
+		padding: 0 0.6rem 0 0.3rem;
 		border: 1px solid #cdc1a9;
-		border-radius: 999px;
-		writing-mode: vertical-rl;
-		transform: translateY(-50%) rotate(180deg);
+		border-radius: 0.8rem;
 		font: 400 0.62rem/1.2 ui-sans-serif, system-ui, sans-serif;
 		letter-spacing: 0.09em;
 		text-transform: uppercase;
@@ -44,15 +60,15 @@
 	.mark {
 		display: grid;
 		place-items: center;
-		width: 1.25rem;
-		height: 1.25rem;
+		width: 0.9rem;
+		height: 0.9rem;
 		border-radius: 50%;
 		background: #9a9081;
 	}
 
 	svg {
-		width: 0.7rem;
-		height: 0.7rem;
+		width: 0.55rem;
+		height: 0.55rem;
 		fill: #f1ebdf;
 	}
 </style>

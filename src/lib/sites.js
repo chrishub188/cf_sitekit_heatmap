@@ -58,6 +58,11 @@ export const PHASES = [
 // label, colour and stacking are derived from each filename (see planning.js).
 // An optional `labels: { [filename]: label }` overrides a derived label.
 
+// Aerial imagery: each site names the satellite layer (see SATELLITE_LAYERS in
+// style.js) of the state it lies in — Mannheim is Baden-Württemberg,
+// Kaiserslautern Rhineland-Palatinate. Only that layer is shown, and so only
+// that state is credited.
+
 // How the camera frames a site's bounds, on load, on a switch and on recenter.
 export const FIT = { padding: 40, maxZoom: 19.5 };
 
@@ -70,6 +75,7 @@ export const SITES = [
 		bearing: 0, // lines the Quadrate grid up with the screen edge
 		filterUrl: '/geojson/planning_areas/Dalbergplatz/00_MA_RaeumlicheAbgrenzung.geojson',
 		grid5mUrl: '/data/5mx5m/dalbergplatz.csv',
+		imagery: 'satellite-bw',
 		planning: {
 			dir: 'Dalbergplatz',
 			files: [
@@ -90,6 +96,7 @@ export const SITES = [
 		bearing: 0,
 		filterUrl: '/geojson/planning_areas/Am_Altenhof/00_KL_RaeumlicheAbgrenzung.geojson',
 		grid5mUrl: null, // not modelled at 5 m; the CSV in static/data/5mx5m/ is header-only
+		imagery: 'satellite-rlp',
 		planning: {
 			dir: 'Am_Altenhof',
 			files: [
@@ -110,6 +117,7 @@ export const SITES = [
 		bearing: 0,
 		filterUrl: '/geojson/filter_location/th_vorplatz.geojson',
 		grid5mUrl: '/data/5mx5m/th_vorplatz.csv',
+		imagery: 'satellite-bw',
 		planning: null // no planning data for this site
 	}
 ].map((site) => ({

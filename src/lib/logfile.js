@@ -22,9 +22,6 @@
  * @typedef {{ entries: LogEntry[], interventions: Intervention[], skipped: number }} ParsedLog
  */
 
-// Every intervention is drawn at the same crown size, whatever its type.
-export const CROWN_RADIUS_M = 3.25;
-
 export const MAX_LOG_BYTES = 25 * 1024 * 1024;
 
 // Shared by the drop zone and the file picker so both reject the same things

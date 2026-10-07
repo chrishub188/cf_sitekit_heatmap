@@ -33,3 +33,25 @@ export function circleRing(lng, lat, radiusM, segments = 24) {
 	ring.push(ring[0]);
 	return ring;
 }
+
+// Closed ring of `shape` (unit-radius [x, y] points, +y north — see
+// CROWN_SHAPE) scaled to radiusM metres around [lng, lat] and turned
+// clockwise by rotationDeg. Same equirectangular convention as circleRing.
+// `step` > 1 keeps every step-th point, for when thousands are drawn at once.
+/**
+ * @param {number} lng @param {number} lat @param {number} radiusM
+ * @param {[number, number][]} shape @param {number} [rotationDeg] @param {number} [step]
+ */
+export function shapeRing(lng, lat, radiusM, shape, rotationDeg = 0, step = 1) {
+	const dLat = radiusM / M_PER_DEG;
+	const dLng = dLat / Math.cos((lat * Math.PI) / 180);
+	const theta = (-rotationDeg * Math.PI) / 180; // compass degrees turn clockwise
+	const [cos, sin] = [Math.cos(theta), Math.sin(theta)];
+	const ring = [];
+	for (let i = 0; i < shape.length; i += step) {
+		const [x, y] = shape[i];
+		ring.push([lng + (x * cos - y * sin) * dLng, lat + (x * sin + y * cos) * dLat]);
+	}
+	ring.push(ring[0]);
+	return ring;
+}

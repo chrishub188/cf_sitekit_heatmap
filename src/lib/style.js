@@ -8,11 +8,13 @@ const SRC = 'versatiles-shortbread';
 // --- aerial imagery --------------------------------------------------------
 // The states' own 20 cm orthophotos (open data, dl-de/by-2-0): sharper than
 // global imagery, dated, and the survey the planning areas are drawn against.
-// Every site lies in one of the two states, so there is no global fallback —
+// Every site lies in one of the two states (each site names its own, see
+// `imagery` in sites.js), so there is no global fallback —
 // one underneath would still be fetched, credited, and flash up first while
 // the slower WMS tiles load. Outside both states the site plan shows through.
-// Each state's WMS clips at its own border and leaves the rest transparent, so
-// the two stack cleanly across the Rhine at Mannheim/Ludwigshafen.
+// Each state's WMS clips at its own border and leaves the rest transparent, and
+// only the site's own one is switched on: across the Rhine from Mannheim
+// (Ludwigshafen), the site plan shows instead of imagery.
 const YEAR = new Date().getFullYear(); // the licence cites the year of retrieval
 // Keeps one source's credit on one line, so a wrapping attribution breaks
 // between credits rather than inside one.
@@ -133,7 +135,13 @@ export const customStyle = {
 			tiles: ['https://tiles.versatiles.org/tiles/osm/{z}/{x}/{y}'],
 			minzoom: 0,
 			maxzoom: 14,
-			attribution: credit('<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>')
+			// MapLibre orders credits by the length of their HTML, shortest first.
+			// The licence tooltip makes this one the longest, so it always comes
+			// last, after whichever state's imagery credit is shown, rather than
+			// landing in the middle on a site whose imagery credit is longer.
+			attribution: credit(
+				'<a href="https://www.openstreetmap.org/copyright" title="Map data from OpenStreetMap, available under the Open Database License (ODbL)">© OpenStreetMap contributors</a>'
+			)
 		},
 		sites: { type: 'geojson', data: SITE_AREAS },
 		...IMAGERY
