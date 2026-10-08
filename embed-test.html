@@ -34,6 +34,7 @@
 		<button id="pushSame">Re-send same id</button>
 		<button id="pushOld">Push older id</button>
 		<button id="pushBroken">Push broken grid</button>
+		<label title="Send the grid as gridJson: a JSON string the page parses, instead of grid: an object"><input id="asString" type="checkbox" checked> as string</label>
 		<label title="An EnvGrid response saved from /api/grid; without one, a synthetic grid around the current position is pushed">grid JSON <input id="gridFile" type="file" accept=".json,application/json"></label>
 		<output id="pushStatus"></output>
 	</div>
@@ -333,7 +334,8 @@
 	//
 	// Plays the Quest app's part of the grid push (README, "Grid pushed by the
 	// Quest app"): one postMessage per
-	// grid, tagged 'cf-temperature-grid', carrying the EnvGrid response as-is.
+	// grid, tagged 'cf-temperature-grid', carrying the EnvGrid response as-is —
+	// as a JSON string (gridJson) or, with "as string" unticked, as an object.
 	// The page acks through the TLab bridge; with no bridge in a desktop browser
 	// it posts the ack to its parent instead, which is what's shown here.
 
@@ -380,11 +382,18 @@
 	function pushGrid(id, grid, note) {
 		if (!ready) return showPush('iframe not loaded yet — press Load');
 		if (!el('unity').checked) return showPush('tick unity=1 and Load first');
+		const asString = el('asString').checked;
 		frame.contentWindow.postMessage(
-			{ source: 'cf-temperature-grid', gridId: id, ackTarget: 'Site Map WebView', t: Date.now(), grid },
+			{
+				source: 'cf-temperature-grid',
+				gridId: id,
+				ackTarget: 'Site Map WebView',
+				t: Date.now(),
+				...(asString ? { gridJson: JSON.stringify(grid) } : { grid })
+			},
 			'*'
 		);
-		showPush(`sent id ${id} (${note})`);
+		showPush(`sent id ${id} (${note}${asString ? ', as string' : ''})`);
 	}
 
 	el('pushNew').onclick = () => {

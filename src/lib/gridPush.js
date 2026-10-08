@@ -4,13 +4,20 @@
 // and +page.svelte): the Quest app fetches one itself and hands it over with
 //
 //   window.postMessage(
-//       { source: 'cf-temperature-grid', gridId, ackTarget, t, grid },
+//       { source: 'cf-temperature-grid', gridId, ackTarget, t, gridJson },
 //       '*'
 //   );
 //
-// where `grid` is the EnvGrid API response exactly as the service returned
-// it, so gridToColumns in envGrid.js reads it unchanged. The full contract,
-// written for the Unity developer, is kept outside the repo.
+// where `gridJson` is the EnvGrid API response text exactly as the service
+// returned it, so gridToColumns in envGrid.js reads it unchanged once parsed.
+// The full contract, written for the Unity developer, is kept outside the repo.
+//
+// The older form `grid: {…}` — the same JSON pasted in as an object literal —
+// is still accepted. It's the expensive one: the host injects the message via
+// EvaluateJS, so ~200 KB of literal has to be compiled as script, and
+// postMessage then deep-copies its 40k values once more before this listener
+// sees them. As a string, the script holds one string literal, postMessage
+// copies one block, and JSON.parse builds the arrays once, here.
 //
 // A grid is sent once, unlike pose, so it can be lost — posted before this
 // module's listener exists, or into a page that has since reloaded. The host
@@ -57,7 +64,7 @@ let lastDrawn = -Infinity;
 /** @type {{gridId: number, error: string} | null} */
 let lastRejected = null;
 
-/** Timing and reply address for the grid currently being built. @type {{gridId: number, ackTarget: string | null, receivedAt: number, deliveryMs: number | null, buildMs: number | null} | null} */
+/** Timing and reply address for the grid currently being built. @type {{gridId: number, ackTarget: string | null, receivedAt: number, deliveryMs: number | null, parseMs: number | null, buildMs: number | null} | null} */
 let current = null;
 
 /** Last ack address seen, for re-acks of a message that left it out. @type {string | null} */
@@ -132,18 +139,28 @@ function handleMessage(/** @type {MessageEvent} */ event) {
 	if (gridId === lastAccepted) return;
 
 	lastAccepted = gridId;
-	const problem = problemWith(data.grid);
+	const receivedAt = performance.now();
+	// Integers throughout: the host reads these with an integer-only parser.
+	const deliveryMs = typeof data.t === 'number' ? Math.max(0, Math.round(Date.now() - data.t)) : null;
+
+	// Parsed only here, past the id checks above, so a re-send never pays for it.
+	let grid = data.grid;
+	/** @type {number | null} */
+	let parseMs = null;
+	if (typeof data.gridJson === 'string') {
+		try {
+			grid = JSON.parse(data.gridJson);
+		} catch {
+			return reject(gridId, target, 'gridJson is not valid JSON');
+		}
+		parseMs = Math.round(performance.now() - receivedAt);
+	}
+
+	const problem = problemWith(grid);
 	if (problem) return reject(gridId, target, problem);
 
-	current = {
-		gridId,
-		ackTarget: target,
-		receivedAt: performance.now(),
-		// Integers throughout: the host reads these with an integer-only parser.
-		deliveryMs: typeof data.t === 'number' ? Math.max(0, Math.round(Date.now() - data.t)) : null,
-		buildMs: null
-	};
-	pushedGrid.set({ gridId, grid: data.grid });
+	current = { gridId, ackTarget: target, receivedAt, deliveryMs, parseMs, buildMs: null };
+	pushedGrid.set({ gridId, grid });
 }
 
 /**
@@ -181,6 +198,7 @@ export function gridDrawn(key) {
 	/** @type {Record<string, unknown>} */
 	const ack = { gridId, ok: true };
 	if (current.deliveryMs !== null) ack.deliveryMs = current.deliveryMs;
+	if (current.parseMs !== null) ack.parseMs = current.parseMs;
 	if (current.buildMs !== null) ack.buildMs = current.buildMs;
 	ack.drawMs = Math.round(performance.now() - current.receivedAt);
 	sendAck(current.ackTarget, ack);

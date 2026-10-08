@@ -477,21 +477,28 @@ the page fetch the grid itself.
 With `?unity=1` the Unity/Quest app supplies the heatmap grid itself and the
 page **never requests one**: not on load, not while walking, and not for
 `interventions`, `sessionId`, `refreshGrid` or a retry. All of that becomes
-the host's job. Pose is unchanged. The host sends the EnvGrid response as-is:
+the host's job. Pose is unchanged. The host sends the EnvGrid response text
+as-is, as a JSON string:
 
 ```js
-window.postMessage({ source: 'cf-temperature-grid', gridId: 7, ackTarget: 'Site Map WebView', t: Date.now(), grid: envGridResponse }, '*');
+window.postMessage({ source: 'cf-temperature-grid', gridId: 7, ackTarget: 'Site Map WebView', t: Date.now(), gridJson: '{"centerCoordinate":…}' }, '*');
 ```
+
+`grid: envGridResponse` (the same JSON pasted in as an object literal) is
+still accepted, but costs far more on the Quest: the injected script has to
+compile ~200 KB of literal, and `postMessage` deep-copies its 40k values,
+where a string is one literal and one block copy, parsed once by the page.
 
 and the page acks each grid once it's on the map, through the TLab bridge the
 host's latency probe already uses:
 
 ```js
-unitySendMessage('Site Map WebView', 'OnSiteMapGridApplied', '{"gridId":7,"ok":true,"deliveryMs":38,"buildMs":21,"drawMs":64}');
+unitySendMessage('Site Map WebView', 'OnSiteMapGridApplied', '{"gridId":7,"ok":true,"deliveryMs":38,"parseMs":9,"buildMs":21,"drawMs":64}');
 ```
 
 A re-send of an already drawn `gridId` is only re-acked, an older one is
-ignored, and an unusable grid is acked with `ok:false`. The host keeps
+ignored, and an unusable grid (including invalid `gridJson`) is acked with
+`ok:false`. `parseMs` is only present for `gridJson`. The host keeps
 re-sending its latest grid until the ack arrives, which covers grids posted
 before the page has started. How the host obtains its grids is
 up to the host and not part of this app.
